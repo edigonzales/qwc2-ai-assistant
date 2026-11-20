@@ -3,6 +3,7 @@
   "messages": {
     "aichat": {
       "cancel": "Abbrechen",
+      "centered": "Karte auf LV95 {0} Ost, {1} Nord zentriert (1:{2}).",
       "clear": "Verlauf löschen",
       "details": "Details",
       "error": {
@@ -31,6 +32,8 @@
         "unavailable": "Der KI-Dienst ist gerade nicht erreichbar."
       },
       "found": "{0} Layer gefunden.",
+      "layerRemoved": "«{0}» wurde von der Karte entfernt.",
+      "layerShown": "«{0}» ist auf der Karte aktiv ({1} von {2} Unterlayern).",
       "loading": "Wird verarbeitet …",
       "noResults": "Im Katalog war kein passender Layer erkennbar. Versuche es mit einem präziseren Thema oder Fachbegriff.",
       "question": "Frage an die Karte",

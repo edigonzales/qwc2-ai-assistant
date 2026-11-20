@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 
 import {runConversation} from '../js/plugins/aichat/conversation.mjs';
-import {limits} from '../js/plugins/aichat/tools.mjs';
+import {createTurnTools, limits} from '../js/plugins/aichat/tools.mjs';
 
 const call = (id, name, args = {}) => ({
     id, type: 'function', function: {name, arguments: JSON.stringify(args)}
@@ -66,8 +66,10 @@ test('a visible QWC name cannot substitute for a catalog ID', async() => {
         reply('Layer entfernt.')
     ];
     const executed = [];
+    const confirmations = [];
     const turn = await runConversation({
         message: 'Entferne den sichtbaren Layer', history: [], lastResults: [],
+        onAction: (name, data) => confirmations.push([name, data]),
         fetchImpl: (_url, options) => {
             if (steps.length === 3) {
                 assert.deepEqual(JSON.parse(options.body).rounds[0].results[1], {
@@ -84,7 +86,27 @@ test('a visible QWC name cannot substitute for a catalog ID', async() => {
         }
     });
     assert.deepEqual(executed, ['catalog.id']);
-    assert.deepEqual(turn, {assistant: 'Layer entfernt.', errors: []});
+    assert.deepEqual(confirmations, [['remove_layer', {removed: true}]]);
+    assert.deepEqual(turn.errors, ['unknownCandidate']);
+});
+
+test('a catalog 404 remains visible alongside a verified removal in the same batch', async() => {
+    const steps = [
+        reply(null, call('a', 'remove_layer', {id: 'catalog.missing'}), call('b', 'remove_layer', {id: 'catalog.known'})),
+        reply('Beide Layer entfernt.')
+    ];
+    const confirmations = [];
+    const runTool = createTurnTools({
+        map: {removeLayer: row => ({id: row.id, title: row.title, removed: true})},
+        fetchImpl: url => url.endsWith('/catalog.missing') ? new Response(null, {status: 404}) :
+            Response.json({id: 'catalog.known', qwcLayerName: 'known', title: 'Bekannter Layer'})
+    });
+    const turn = await runConversation({
+        message: 'Entferne die Layer catalog.missing und catalog.known.', history: [], lastResults: [],
+        fetchImpl: () => steps.shift(), runTool, onAction: (name, data) => confirmations.push([name, data])
+    });
+    assert.deepEqual(confirmations, [['remove_layer', {id: 'catalog.known', title: 'Bekannter Layer', removed: true}]]);
+    assert.deepEqual(turn.errors, ['layerUnknown']);
 });
 
 test('the browser stops before executing a fourth-round or excess batch', async() => {

@@ -60,3 +60,20 @@ Fragen. Ein gezielter Chromium-Test verwendete für die nachgebildete
 Fehlsequenz eine kontrollierte Modellantwort, den echten Quarkus-Katalog
 und QWC2-Redux. Die Metadaten- und Kartenbefehle wurden separat mit echtem
 Infomaniak erneut geprüft.
+
+Nachprüfung von `602dbe4d869938e41f4bc16778abad0889477414`: **FAIL** mit
+OpenCode 2.0.28 und `deepseek/deepseek-flash` bei 44 Node- und 19 SDK-Tests.
+Die Gegenproben zeigten eine verdeckte Fehlermeldung bei Teilerfolgen,
+eine mögliche Kartenänderung bei einer reinen Layerfrage und eine
+Lücke bei Namen in Anführungszeichen. Die Nachbesserung erlaubt je Turn
+nur das ausdrücklich angeforderte Kartenwerkzeug. Bei Teilerfolgen zeigt
+der Chat bestätigte Redux-Ergebnisse aus den tatsächlich ausgeführten
+Werkzeugen neben der Fehlermeldung. Layernamen in Anführungszeichen und
+«Nummer 2 anzeigen» werden unterstützt.
+Lokal bestanden 45 Node- und 20 isolierte SDK-Tests, ESLint und der
+Compose-Build. Chromium prüfte den Kartenablauf mit Infomaniak inklusive
+«Nummer 2 anzeigen», Desktop und Mobilgrösse. Eine reine Layerfrage und
+ein Layername in Anführungszeichen liefen mit dem echten Modell. Zum
+Teilerfolg zeigte ein gezielter Test mit vorgegebenen Modellaufrufen einen
+echten Quarkus-404 und eine bestätigte Entfernung in QWC2. Die Suchmessung
+enthält die Ergebnisse des letzten vollständigen Durchlaufs.

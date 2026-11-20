@@ -60,6 +60,9 @@ Beispiele für Anfragen:
 **Details** liest Metadaten zu einem Treffer. **Anzeigen** schaltet den
 Treffer direkt auf der Karte ein. Die Nummern beziehen sich auf die zuletzt
 angezeigte Liste. QWC2 wählt beim Zentrieren eine unterstützte Zoomstufe.
+Für Kartenänderungen gibt der Server pro Nachricht das zu einem klar
+erkannten Auftrag passende Kartenwerkzeug frei. Die Beispielsätze zeigen
+die unterstützten Formen.
 
 Pro Nachricht sind vier Modellrunden und acht Tool-Aufrufe möglich.
 Davon sind höchstens drei kurze Lucene-Abfragen mit je bis zu 20 Treffern

@@ -5,6 +5,7 @@
   ],
   "strings": [
     "aichat.cancel",
+    "aichat.centered",
     "aichat.clear",
     "aichat.details",
     "aichat.error.authentication",
@@ -31,6 +32,8 @@
     "aichat.error.toolSupport",
     "aichat.error.unavailable",
     "aichat.found",
+    "aichat.layerRemoved",
+    "aichat.layerShown",
     "aichat.loading",
     "aichat.noResults",
     "aichat.question",

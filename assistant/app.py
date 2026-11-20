@@ -159,14 +159,44 @@ def messages_for(chat):
     return messages, used_ids, searches
 
 
-def tool_choice_for(chat):
-    message = chat.message.strip().lower()
-    imperative = re.sub(r"^(?:bitte|please)\s+", "", message)
+def named_layer(message):
+    return re.search(r"\b(?:layer|ebene)(?:\s*:\s*|\s+)[«“\"']?(?!(?:auf|von|in|im|on|from|an|are|sind)\b)\w", message)
+
+
+def catalog_reference(message):
+    return re.search(definition["ordinalPattern"], message) or re.search(
+        r"\b(?:ch\.[a-z0-9_.:-]+|id\s+[a-z0-9_.:-]+)\b", message
+    )
+
+
+def map_command(message):
+    if metadata_request.search(message) or re.search(
+        r"\b(?:nicht|nie|niemals|not|never|wenn|falls|if|unless|liste|trefferliste|ergebnisliste|list|verlauf|history|was|what|welche|which)\b",
+        message
+    ):
+        return None
+    if (re.match(r"^(?:zentrier(?:e)?|zoom(?:e)?|center)\b", message) and "lv95" in message
+        and len(re.findall(r"\b[0-9]+", message)) >= 3 and re.search(r"massstab|maßstab|scale|1\s*:", message)):
+        return "zoom_to_lv95"
+    numbered_command = re.fullmatch(definition["ordinalPattern"] + r"\s+(anzeigen|einblenden|entfernen|show|remove)[.!]?", message)
+    if numbered_command:
+        return "remove_layer" if numbered_command[2] in {"entfernen", "remove"} else "add_layer"
+    if re.match(r"^(?:entferne|remove)\b", message) and (catalog_reference(message) or re.search(r"\b(?:layer|ebene)\b", message)):
+        return "remove_layer"
+    if (re.match(r"^(?:zeig(?:e)?|show|aktiviere|blende|enable|füge|add)\b", message)
+        and not re.search(r"\b(?:sichtbare[nr]?|visible|eingeblendete[nr]?|geladene[nr]?)\b", message)
+        and (named_layer(message) or catalog_reference(message)
+             or re.search(r"\b(?:auf (?:der|meiner|dieser) karte|on (?:the|my) map)\b", message))):
+        return "add_layer"
+    return None
+
+
+def tool_choice_for(chat, message, mutation):
     search_request = (
-        re.match(r"^(?:such(?:e)?|find(?:e)?|search)\b(?!\s+(?:nicht|not)\b)", imperative)
-        or (re.match(r"^(?:welche|which)\b", imperative) and re.search(r"\b(?:karten|maps)\b", imperative)
-            and not re.search(r"\b(?:sichtbar|visible|geladen|eingeblendet)\b", imperative))
-        or re.search(r"\bkartiert\b", imperative)
+        re.match(r"^(?:such(?:e)?|find(?:e)?|search)\b(?!\s+(?:nicht|not)\b)", message)
+        or (re.match(r"^(?:welche|which)\b", message) and re.search(r"\b(?:karten|maps)\b", message)
+            and not re.search(r"\b(?:sichtbar|visible|geladen|eingeblendet)\b", message))
+        or re.search(r"\bkartiert\b", message)
     )
     prior_calls = {call.function.name for step in chat.rounds for call in step.calls}
     search_outcomes = [json.loads(result.content) for step in chat.rounds
@@ -180,40 +210,19 @@ def tool_choice_for(chat):
         if "present_layer_results" not in prior_calls:
             return {"type": "function", "function": {"name": "present_layer_results"}}
         return "auto"
-    if re.search(r"\b(?:nicht|nie|niemals|not|never|wenn|falls|if|unless)\b", message):
-        return "auto"
-    ordinal = definition["ordinalPattern"]
-    numbered = re.search(ordinal, message)
+    numbered = re.search(definition["ordinalPattern"], message)
     if numbered and not chat.last_results:
         return "auto"
-    has_target = numbered is not None or re.search(r"\b(?:ch\.[a-z0-9_.:-]+|id\s+[a-z0-9_.:-]+)\b", message)
-    named_layer = not numbered and re.search(r"\b(?:layer|ebene)\s+(?!(?:auf|von|in|im|on|from|an|are|sind)\b)\w", imperative)
-
-    if metadata_request.search(message):
-        name = "get_layer_details"
-    elif re.search(r"\b(?:liste|trefferliste|ergebnisliste|list|verlauf|history)\b", message):
+    name = mutation or ("get_layer_details" if metadata_request.search(message) else None)
+    if not name or name in prior_calls:
         return "auto"
-    elif (re.match(r"^(?:zentrier(?:e)?|zoom(?:e)?|center)\b", imperative) and "lv95" in message
-          and len(re.findall(r"\b[0-9]+", message)) >= 3 and re.search(r"massstab|maßstab|scale|1\s*:", message)):
-        name = "zoom_to_lv95"
-    elif re.match(r"^(?:entferne|remove)\b", imperative):
-        name = "remove_layer"
-    elif (re.match(r"^(?:aktiviere|blende|enable)\b", imperative) or
-          (re.match(r"^(?:zeig(?:e)?|show)\b", imperative) and (
-              named_layer or re.search(r"\b(?:auf (?:der|meiner|dieser) karte|on (?:the|my) map|an[.!]?$)", imperative) or
-              re.fullmatch(r"(?:zeig(?:e)?|show)(?:\s+mir)?\s+" + ordinal + r"[.!]?", imperative)))):
-        name = "add_layer"
-    else:
-        return "auto"
-
-    if name in prior_calls:
-        return "auto"
+    named = not numbered and named_layer(message)
     if not chat.rounds:
-        if has_target or name == "zoom_to_lv95":
+        if catalog_reference(message) or name == "zoom_to_lv95":
             return {"type": "function", "function": {"name": name}}
-        if named_layer:
+        if named:
             return {"type": "function", "function": {"name": "search_layers"}}
-    elif named_layer:
+    elif named:
         for outcome in search_outcomes:
             data = outcome.get("data")
             if outcome["ok"] and isinstance(data, dict) and data.get("layers"):
@@ -257,8 +266,10 @@ async def chat(request: Request):
     except (ValueError, RecursionError) as exc:
         raise HTTPException(400, "invalidConversation") from exc
 
-    tool_choice = tool_choice_for(payload)
-    blocked_tools = map_mutations if metadata_request.search(payload.message) else set()
+    phrase = re.sub(r"^(?:bitte|please)\s+", "", payload.message.strip().lower())
+    mutation = map_command(phrase)
+    tool_choice = tool_choice_for(payload, phrase, mutation)
+    blocked_tools = map_mutations - {mutation}
     available_tools = [tool for tool in tools if tool["function"]["name"] not in blocked_tools]
     client, model = infomaniak_client()
     try:
@@ -295,7 +306,7 @@ async def chat(request: Request):
         fields = {"id": True, "type": True, "function": {"name", "arguments"}}
         calls = [Call.model_validate(call.model_dump(include=fields)) for call in raw_calls or []]
         if any(call.function.name in blocked_tools for call in calls):
-            raise ValueError("unexpected tool for metadata request")
+            raise ValueError("map tool not requested")
         if tool_choice != "auto" and not calls:
             raise ValueError("required tool call missing")
         if tool_choice == "required" and any(call.function.name != "search_layers" for call in calls):

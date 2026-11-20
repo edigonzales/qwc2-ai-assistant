@@ -46,6 +46,15 @@ function errorLabel(code) {
     }
 }
 
+function actionLabel(name, data) {
+    switch (name) {
+    case 'add_layer': return LocaleUtils.tr('aichat.layerShown', data.title, data.enabled, data.total);
+    case 'remove_layer': return LocaleUtils.tr('aichat.layerRemoved', data.title);
+    case 'zoom_to_lv95': return LocaleUtils.tr('aichat.centered', data.center[0], data.center[1], data.scale);
+    default: return '';
+    }
+}
+
 export default function AIChatPlugin() {
     const store = useStore();
     const locale = useSelector(state => state.locale.current);
@@ -97,22 +106,26 @@ export default function AIChatPlugin() {
         setNotice(null);
         setPending(message);
         setBusy(true);
+        const confirmations = [];
         try {
             let presented;
             const runTool = createQwcTurnTools(store, {
                 signal: controller.signal, onResults: rows => { presented = rows; }
             });
             const history = turns.map(({user, assistant}) => ({user, assistant}));
-            const result = await runConversation({message, history, lastResults: results, runTool, signal: controller.signal});
+            const result = await runConversation({
+                message, history, lastResults: results, runTool, signal: controller.signal,
+                onAction: (name, data) => confirmations.push(actionLabel(name, data))
+            });
             controller.signal.throwIfAborted();
             const issue = result.errors[0];
             let answer = result.assistant;
             if (issue) {
-                answer = errorLabel(issue);
+                answer = confirmations.join('\n').slice(0, limits.replyLength) || errorLabel(issue);
             } else if (presented) {
                 answer = presented.length ? LocaleUtils.tr('aichat.found', presented.length) : LocaleUtils.tr('aichat.noResults');
             }
-            const turn = {user: message, assistant: answer, failed: Boolean(issue), key: ++nextMessage.current};
+            const turn = {user: message, assistant: answer, failed: Boolean(issue && !confirmations.length), key: ++nextMessage.current};
             setTurns(previous => [...previous, turn].slice(-limits.historyTurns));
             if (presented) {
                 setResults(presented);
@@ -122,7 +135,12 @@ export default function AIChatPlugin() {
         } catch (err) {
             if (!controller.signal.aborted) {
                 setError(errorCode(err));
-                setInput(message);
+                if (confirmations.length) {
+                    const turn = {user: message, assistant: confirmations.join('\n').slice(0, limits.replyLength), key: ++nextMessage.current};
+                    setTurns(previous => [...previous, turn].slice(-limits.historyTurns));
+                } else {
+                    setInput(message);
+                }
             }
         } finally {
             if (active.current === controller) cancel();

@@ -1,12 +1,13 @@
 import {limits, numberedLayer, ordinalPattern} from './tools.mjs';
 
 const idTools = new Set(['add_layer', 'remove_layer', 'get_layer_details']);
+const mapActions = new Set(['add_layer', 'remove_layer', 'zoom_to_lv95']);
 
 export function errorCode(error, fallback = 'chatFailed') {
     return /^[a-z][A-Za-z0-9]{0,59}$/.test(error?.message || '') ? error.message : fallback;
 }
 
-export async function runConversation({message, history, lastResults, runTool, signal, fetchImpl = fetch}) {
+export async function runConversation({message, history, lastResults, runTool, signal, onAction = () => {}, fetchImpl = fetch}) {
     const requestedNumbers = [...message.matchAll(new RegExp(ordinalPattern, 'gi'))];
     const selected = requestedNumbers.length === 1 ? numberedLayer(lastResults, Number(requestedNumbers[0][1])) : null;
     if (requestedNumbers.length === 1 && !selected) throw new Error('unknownResult');
@@ -20,7 +21,7 @@ export async function runConversation({message, history, lastResults, runTool, s
         rounds: []
     };
     const callIds = new Set();
-    const errors = new Map();
+    const errors = new Set();
     let searches = 0;
 
     for (let round = 0; round < limits.rounds; round++) {
@@ -53,7 +54,7 @@ export async function runConversation({message, history, lastResults, runTool, s
         }
         if (!calls.length) {
             if (!assistant.content?.trim()) throw new Error('invalidModelResponse');
-            return {assistant: assistant.content.trim(), errors: [...new Set(errors.values())]};
+            return {assistant: assistant.content.trim(), errors: [...errors]};
         }
         searches += calls.filter(call => call?.function?.name === 'search_layers').length;
         if (round + 1 === limits.rounds || callIds.size + calls.length > limits.calls || searches > limits.searches) {
@@ -81,11 +82,11 @@ export async function runConversation({message, history, lastResults, runTool, s
                 if (name === 'search_layers') data.layers.forEach(row => knownIds.add(row.id));
                 content = JSON.stringify({ok: true, data});
                 if (content.length > limits.resultLength) throw new Error('resultTooLarge');
-                errors.delete('unknownCandidate:' + name);
+                if (mapActions.has(name)) onAction(name, data);
             } catch (error) {
                 signal?.throwIfAborted();
                 const code = errorCode(error, 'toolFailed');
-                errors.set(code === 'unknownCandidate' ? code + ':' + name : code, code);
+                errors.add(code);
                 content = JSON.stringify({ok: false, error: code});
             }
             results.push({tool_call_id: call.id, content});
