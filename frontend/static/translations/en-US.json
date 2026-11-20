@@ -1,8 +1,46 @@
 {
   "locale": "en-US",
   "messages": {
+    "aichat": {
+      "cancel": "Cancel",
+      "clear": "Clear history",
+      "details": "Details",
+      "error": {
+        "authentication": "Infomaniak rejected the token or product ID.",
+        "candidate": "The proposed layer ID is missing from the relevant results.",
+        "catalog": "The map catalog is currently unavailable.",
+        "catalogResponse": "The map catalog response could not be read.",
+        "config": "Set the Infomaniak values in the local .env to use chat.",
+        "definition": "The map definition for this layer could not be loaded.",
+        "general": "The request could not be completed.",
+        "invalidTool": "The map tool received invalid arguments.",
+        "layerNotOnMap": "This layer is absent from the map.",
+        "layerUnknown": "The catalog could not find that layer ID.",
+        "limit": "The model or tool call limit was reached. Split the request into smaller steps.",
+        "map": "The map is still loading.",
+        "mapAction": "The map action could not be confirmed.",
+        "modelResponse": "The model response could not be processed.",
+        "number": "That number is absent from the latest results.",
+        "numberedSearch": "The number refers to the latest results. Send a separate question for a new search.",
+        "providerRejected": "Infomaniak rejected the chat request.",
+        "rate": "Infomaniak is rate limiting requests. Try again shortly.",
+        "size": "The message and its context are too large. Shorten the request or clear the history.",
+        "theme": "The map theme changed. Repeat the request for the current map.",
+        "timeout": "The model took too long to respond.",
+        "toolSupport": "Infomaniak rejected tool calls for this model.",
+        "unavailable": "The AI service is currently unavailable."
+      },
+      "loading": "Working …",
+      "question": "Ask the map",
+      "results": "Matching layers",
+      "send": "Send",
+      "show": "Show",
+      "shown": "{0} of {1} sublayers are enabled.",
+      "you": "You"
+    },
     "appmenu": {
       "items": {
+        "AIChat": "AI assistant",
         "LandRegisterExtract": "Land Register Map Extract",
         "LegendPrint": "Print legend",
         "Bookmark": "Bookmarks",

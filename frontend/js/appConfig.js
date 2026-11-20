@@ -51,6 +51,7 @@ import {ZoomInPlugin, ZoomOutPlugin} from 'qwc2/plugins/ZoomButtons';
 import LayerUtils from 'qwc2/utils/LayerUtils';
 
 import defaultLocaleData from '../static/translations/de-CH.json';
+import AIChatPlugin from './plugins/AIChatPlugin';
 import CCCEditSupport from './plugins/CCCEditSupport';
 import {CCCInterfacePlugin, CCCAttributeCalculator} from './plugins/CCCInterface';
 import LandRegisterExtractPlugin from './plugins/LandRegisterExtract';
@@ -68,6 +69,7 @@ export default {
     },
     pluginsDef: {
         plugins: {
+            AIChatPlugin: AIChatPlugin,
             APIPlugin: APIPlugin,
             MapPlugin: MapPlugin({
                 EditingSupport: EditingSupport,

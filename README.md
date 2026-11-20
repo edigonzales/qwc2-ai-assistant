@@ -10,6 +10,8 @@ Der unveränderte [Quarkus-Kartenkatalog](https://github.com/edigonzales/kartenk
 lädt den unvollständigen XTF-Entwicklungsstand aus `data/`. Der Kartenclient
 erreicht die API unter `/catalog-api/v1/ebenen`. Der FastAPI-Dienst vermittelt
 Chat und Function Calling über die OpenAI-kompatible Infomaniak-API.
+QWC2 führt die Kartenaktionen im Browser aus. Der Chatverlauf lebt im
+Browser und wird beim Neuladen verworfen.
 
 ## Lokal starten
 
@@ -39,6 +41,30 @@ Für den Chat `INFOMANIAK_API_TOKEN`, `INFOMANIAK_PRODUCT_ID` und
 `INFOMANIAK_MODEL` in der gitignorierten `.env` setzen. Compose übergibt
 diese Werte an FastAPI. Das Modell muss auf dem gewählten Produkt
 verfügbar sein und Function Calling unterstützen.
+Mit `Qwen/Qwen3.8-27B-FP8` wurden Modellliste, Text und Function Calling
+am konfigurierten Testprodukt geprüft. [Infomaniak API](https://developer.infomaniak.com/docs/api/post/2/ai/%7Bproduct_id%7D/openai/v1/chat/completions)
+
+## Karte und Chat
+
+Über **Karte & Werkzeuge → KI-Assistent** öffnet sich die rechte Seitenleiste.
+Beispiele für Anfragen:
+
+- «Wo ist meine Karte zentriert und welche thematischen Layer sind sichtbar?»
+- «Suche Karten zu Wasser und Grundwasser im Kanton Solothurn.»
+- «Mehr Informationen zu Nummer 2.»
+- «Zeige Nummer 2 auf der Karte.»
+- «Entferne den Layer Gemeindegrenzen.»
+- «Zentriere die Karte auf LV95 2607100 Ost und 1228400 Nord im Massstab 1:10000.»
+
+**Details** liest Metadaten zu einem Treffer. **Anzeigen** schaltet den
+Treffer direkt auf der Karte ein. Die Nummern beziehen sich auf die zuletzt
+angezeigte Liste. QWC2 wählt beim Zentrieren eine unterstützte Zoomstufe.
+
+Pro Nachricht sind vier Modellrunden und acht Tool-Aufrufe möglich.
+Davon sind höchstens drei kurze Lucene-Abfragen mit je bis zu 20 Treffern
+zulässig. Das Modell sortiert bis zu 40 eindeutige Kandidaten und kann bis zu
+zehn davon anzeigen. Der Browser prüft die IDs gegen die aktuellen Treffer.
+[Suchmessung mit zehn Fachfragen](docs/search-quality.md)
 
 ## Prüfen
 
@@ -56,3 +82,7 @@ und Legenden. Die zugelassenen Routen stehen im gemeinsamen
 [Proxy](frontend/server/remote.cjs). Für öffentlichen Betrieb wären
 Authentifizierung, Missbrauchs- und Kostenlimits sowie Berechtigungsprüfungen
 erforderlich.
+
+Der Entwicklungs-Harvest ist unvollständig. Die Treffer hängen von den
+vorhandenen Metadaten und den Suchbegriffen ab. Einzelne Layerdefinitionen
+oder Fremddienste können ausfallen. [Reale Prüfungen und Reviewstand](docs/review.md)

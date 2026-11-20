@@ -7,7 +7,7 @@ test('anonymous overlay preserves unrelated live settings and input', () => {
     const result = adaptConfig(original);
     assert.equal(original.username, 'private');
     assert.equal(result.username, null);
-    assert.deepEqual(result.plugins.desktop.map(p => p.name), ['Map']);
+    assert.deepEqual(result.plugins.desktop.map(p => p.name), ['Map', 'AIChat']);
     assert.equal(result.assetsPath, '/map/assets');
 });
 test('rewrite live WMTS origin and strip editing metadata', () => {
@@ -67,8 +67,8 @@ test('blocked request never contacts production', async t => {
 });
 test('disabled plugins and their nested menu entries are removed', () => {
     const config = adaptConfig({plugins: {desktop: [{name: 'TopBar', cfg: {menuItems: [{key: 'Tools', subitems: [{key: 'Editing'}, {key: 'Measure'}, {key: 'MapExport'}]}, {key: 'LoginMySoCh'}, {key: 'Kartenkatalog'}]}}, {name: 'MapExport'}]}});
-    assert.deepEqual(config.plugins.desktop[0].cfg.menuItems, [{key: 'Tools', subitems: [{key: 'Measure'}]}]);
-    assert.deepEqual(config.plugins.desktop.map(plugin => plugin.name), ['TopBar']);
+    assert.deepEqual(config.plugins.desktop[0].cfg.menuItems, [{key: 'Tools', subitems: [{key: 'Measure'}]}, {key: 'AIChat', icon: 'catalog'}]);
+    assert.deepEqual(config.plugins.desktop.map(plugin => plugin.name), ['TopBar', 'AIChat']);
 });
 test('root redirect keeps query and targets local app', async t => {
     const res = await request(t, () => { throw new Error('must not run'); }, '/?l=example', {redirect: 'manual'});
@@ -155,4 +155,20 @@ test('unavailable Python service has a stable response and no upstream detail', 
         '/assistant-api/v1/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
     assert.equal(response.status, 502);
     assert.deepEqual(await response.json(), {detail: 'assistantUnavailable'});
+});
+
+test('chat registers once for desktop and mobile and stays closed at startup', () => {
+    const config = adaptConfig(adaptConfig({
+        plugins: {
+            desktop: [{name: 'TopBar', cfg: {menuItems: [{key: 'AIChat', icon: 'invalid'}]}}, {name: 'AIChat'}],
+            mobile: [{name: 'TopBar'}]
+        },
+        startupTask: {key: 'AIChat'}
+    }));
+    for (const device of ['desktop', 'mobile']) {
+        const plugins = config.plugins[device];
+        assert.equal(plugins.filter(plugin => plugin.name === 'AIChat').length, 1);
+        assert.deepEqual(plugins.find(plugin => plugin.name === 'TopBar').cfg.menuItems, [{key: 'AIChat', icon: 'catalog'}]);
+    }
+    assert.equal(config.startupTask, undefined);
 });

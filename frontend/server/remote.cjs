@@ -6,7 +6,7 @@ const chatPath = '/assistant-api/v1/chat';
 const disabled = new Set([
     'NewsPopup', 'Login', 'Logout', 'LoginMySoCh', 'Authentication', 'Autologin', 'LoginUser',
     'Editing', 'CCCInterface', 'Print', 'MapExport', 'LegendPrint', 'LandRegisterExtract',
-    'PlotInfoTool', 'Share', 'Bookmark', 'HeightProfile', 'MapInfoTooltip', 'Kartenkatalog'
+    'PlotInfoTool', 'Share', 'Bookmark', 'HeightProfile', 'MapInfoTooltip', 'Kartenkatalog', 'AIChat'
 ]);
 const catalogPath = /^\/catalog-api\/v1\/ebenen(?:\/[A-Za-z0-9_.:-]{1,200})?$/;
 
@@ -25,6 +25,16 @@ function adaptConfig(input) {
     }
     for (const key of Object.keys(config.plugins || {})) {
         if (Array.isArray(config.plugins[key])) config.plugins[key] = config.plugins[key].filter(plugin => !disabled.has(plugin.name));
+    }
+    for (const device of ['desktop', 'mobile']) {
+        const plugins = config.plugins[device] ||= [];
+        plugins.push({name: 'AIChat'});
+        const topbar = plugins.find(plugin => plugin.name === 'TopBar');
+        if (topbar) {
+            topbar.cfg ||= {};
+            topbar.cfg.menuItems ||= [];
+            topbar.cfg.menuItems.push({key: 'AIChat', icon: 'catalog'});
+        }
     }
     if (disabled.has(config.startupTask?.key)) delete config.startupTask;
     return config;

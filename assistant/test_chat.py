@@ -7,7 +7,7 @@ import httpx2 as httpx
 from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
 
-from app import app, limits
+from app import Chat, app, limits, tool_choice_for
 
 
 def call(name="get_map_state", identifier="call_m", arguments=None):
@@ -91,6 +91,35 @@ class ChatTests(unittest.TestCase):
         messages = self.requests[0]["messages"]
         self.assertEqual([message["role"] for message in messages], ["system", "user", "assistant", "user"])
         self.assertIn('"number": 2, "id": "water.two"', messages[-1]["content"])
+        self.assertEqual(self.requests[0]["tool_choice"], {"type": "function", "function": {"name": "add_layer"}})
+
+    def test_explicit_map_action_requires_the_bound_tool(self):
+        for model_reply in [completion("Angezeigt."), completion(calls=[call()])]:
+            self.requests.clear()
+            response = self.send({"message": "Zeige den Layer mit ID ch.so.agi.gemeindegrenzen auf der Karte."},
+                                 httpx.Response(200, json=model_reply))
+            self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+
+    def test_numbered_details_and_negated_or_list_requests_do_not_force_mutations(self):
+        references = [{"id": "water.one", "title": "Fluss"}]
+        details = Chat(message="Zeig mir Details zu Nummer 1", last_results=references)
+        self.assertEqual(tool_choice_for(details), {"type": "function", "function": {"name": "get_layer_details"}})
+        for message in ["Zeige Nummer 1 nicht auf der Karte", "Entferne Nummer 1 aus der Trefferliste"]:
+            self.assertEqual(tool_choice_for(Chat(message=message, last_results=references)), "auto")
+
+    def test_named_layer_requires_search_then_corresponding_map_tool(self):
+        message = "Entferne den Layer Gemeindegrenzen."
+        query = call("search_layers", "search", {"query": "Gemeindegrenzen"})
+        first = self.send({"message": message}, httpx.Response(200, json=completion(calls=[query])))
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(self.requests[0]["tool_choice"]["function"]["name"], "search_layers")
+        actual = step(query)
+        actual["results"][0]["content"] = '{"ok":true,"data":{"layers":[{"id":"ch.so.agi.gemeindegrenzen"}]}}'
+        self.requests.clear()
+        output = call("remove_layer", arguments={"id": "ch.so.agi.gemeindegrenzen"})
+        second = self.send({"message": message, "rounds": [actual]}, httpx.Response(200, json=completion(calls=[output])))
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(self.requests[0]["tool_choice"]["function"]["name"], "remove_layer")
 
     def test_unknown_tool_and_invalid_arguments_are_rejected(self):
         for request in [call("shell"), call("zoom_to_lv95", arguments={"easting": True, "northing": 1228400, "scale": 10000}),

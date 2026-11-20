@@ -1,8 +1,46 @@
 {
   "locale": "de-CH",
   "messages": {
+    "aichat": {
+      "cancel": "Abbrechen",
+      "clear": "Verlauf löschen",
+      "details": "Details",
+      "error": {
+        "authentication": "Infomaniak lehnt den Token oder die Produkt-ID ab.",
+        "candidate": "Die vorgeschlagene Layer-ID stammt aus keinem passenden Ergebnis.",
+        "catalog": "Der Kartenkatalog ist gerade nicht erreichbar.",
+        "catalogResponse": "Die Antwort des Kartenkatalogs konnte nicht gelesen werden.",
+        "config": "Für den Chat fehlen Infomaniak-Einstellungen in der lokalen .env.",
+        "definition": "Die Kartendefinition dieses Layers konnte nicht geladen werden.",
+        "general": "Die Anfrage konnte nicht abgeschlossen werden.",
+        "invalidTool": "Das Kartenwerkzeug hat ungültige Argumente erhalten.",
+        "layerNotOnMap": "Dieser Layer ist auf der Karte nicht geladen.",
+        "layerUnknown": "Diese Layer-ID wurde im Katalog nicht gefunden.",
+        "limit": "Das Limit für Modellrunden oder Tool-Aufrufe ist erreicht. Teile die Anfrage auf.",
+        "map": "Die Karte ist noch nicht bereit.",
+        "mapAction": "Die Kartenaktion konnte nicht bestätigt werden.",
+        "modelResponse": "Die Modellantwort konnte nicht verarbeitet werden.",
+        "number": "Diese Nummer gibt es in der letzten Trefferliste nicht.",
+        "numberedSearch": "Die Nummer bezieht sich auf die letzte Trefferliste. Stelle für eine neue Suche eine eigene Frage.",
+        "providerRejected": "Infomaniak hat die Chat-Anfrage abgelehnt.",
+        "rate": "Infomaniak begrenzt die Anfragen. Versuche es gleich nochmals.",
+        "size": "Die Nachricht und ihr Kontext sind zu gross. Kürze die Anfrage oder lösche den Verlauf.",
+        "theme": "Das Kartenthema hat gewechselt. Wiederhole die Anfrage auf der aktuellen Karte.",
+        "timeout": "Die Modellantwort hat zu lange gedauert.",
+        "toolSupport": "Infomaniak hat die Tool-Aufrufe für dieses Modell abgelehnt.",
+        "unavailable": "Der KI-Dienst ist gerade nicht erreichbar."
+      },
+      "loading": "Wird verarbeitet …",
+      "question": "Frage an die Karte",
+      "results": "Gefundene Layer",
+      "send": "Senden",
+      "show": "Anzeigen",
+      "shown": "{0} von {1} Unterlayern sind aktiv.",
+      "you": "Du"
+    },
     "appmenu": {
       "items": {
+        "AIChat": "KI-Assistent",
         "LandRegisterExtract": "Auszug Plan für das Grundbuch",
         "LegendPrint": "Legende drucken",
         "Bookmark": "Lesezeichen",
