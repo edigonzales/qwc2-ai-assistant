@@ -168,22 +168,32 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(tool_choice_for(Chat(message="Zeige Layer zum Thema Wasser.")), "required")
 
     def test_visible_layer_question_requires_fresh_tool_data(self):
-        message = "Zeige die Layer die sichtbar sind"
         history = [{"user": "Welche Layer sind sichtbar?", "assistant": "Gemeindegrenzen sind sichtbar."}]
-        answer = self.send({"message": message, "history": history},
-                           httpx.Response(200, json=completion("Gemeindegrenzen sind sichtbar.")))
-        self.assertEqual((answer.status_code, answer.json()), (502, {"detail": "invalidModelResponse"}))
-        self.assertEqual(self.requests[0]["tool_choice"]["function"]["name"], "get_visible_layers")
+        for message in ["Zeige die Layer die sichtbar sind", "Zeige die Layer auf der Karte"]:
+            self.requests.clear()
+            answer = self.send({"message": message, "history": history},
+                               httpx.Response(200, json=completion("Gemeindegrenzen sind sichtbar.")))
+            self.assertEqual((answer.status_code, answer.json()), (502, {"detail": "invalidModelResponse"}))
+            self.assertEqual(self.requests[0]["tool_choice"]["function"]["name"], "get_visible_layers")
 
-    def test_forced_argument_free_read_discards_provider_fields(self):
-        message = {"message": "Welche Layer sind sichtbar?"}
+    def test_argument_free_read_discards_provider_fields(self):
         output = call("get_visible_layers", arguments={"theme": "default"})
-        response = self.send(message, httpx.Response(200, json=completion(calls=[output])))
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["assistant"]["tool_calls"], [call("get_visible_layers")])
+        for message in ["Welche Layer sind sichtbar?", "Kartenstatus"]:
+            self.requests.clear()
+            response = self.send({"message": message}, httpx.Response(200, json=completion(calls=[output])))
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["assistant"]["tool_calls"], [call("get_visible_layers")])
         self.requests.clear()
-        response = self.send(message, httpx.Response(200, json=completion(calls=[call("get_visible_layers", arguments=[])])))
+        response = self.send({"message": "Welche Layer sind sichtbar?"},
+                             httpx.Response(200, json=completion(calls=[call("get_visible_layers", arguments=[])])))
         self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+
+    def test_remove_layer_can_name_a_visible_layer_or_use_a_relative_clause(self):
+        search = step(call("search_layers", "search", {"query": "Gemeindegrenzen"}))
+        search["results"][0]["content"] = '{"ok":true,"data":{"layers":[{"id":"ch.so.agi.gemeindegrenzen"}]}}'
+        for message in ["Entferne den sichtbaren Layer Gemeindegrenzen.", "Entferne den Layer, der Gemeindegrenzen heisst."]:
+            self.assertEqual(tool_choice_for(Chat(message=message))["function"]["name"], "search_layers")
+            self.assertEqual(tool_choice_for(Chat(message=message, rounds=[search]))["function"]["name"], "remove_layer")
 
     def test_explicit_add_turn_excludes_other_map_tools(self):
         response = self.send({"message": "Zeige Layer Gemeindegrenzen."}, httpx.Response(200, json=completion(calls=[call(

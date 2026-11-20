@@ -28,6 +28,7 @@ layer_name = re.compile(
     r"\b(?:layer|ebene)(?:\s*:\s*|\s+)(?:[«‹„“‚‘(\"']\w|(?:mit|with)\s+id\s+\w|"
     r"(?!(?:auf|von|in|im|on|from|an|are|sind|die|der|das|that|which|visibility|sichtbarkeit|zu|zum|zur|über|about|mit|with)\b)\w)"
 )
+layer_relative_name = re.compile(r"\b(?:layer|ebene)\s*,\s*(?:der|die)\s+\S.*\s+(?:heisst|heißt)[.!?]?$")
 system_prompt = """You are the assistant for the Solothurn QWC2 map. Reply in the user's language and use plain text.
 Use the supplied tools to read the actual map or change it only as explicitly requested.
 Never invent map state, catalog entries, IDs, tool execution or success. Use real IDs from
@@ -181,8 +182,13 @@ def map_command(message):
                        r"(?:(?:mir|me)\s+)?(?:(?:den|die|das|the)\s+)?", message)
     if command:
         target = message[command.end():]
+        remove = command[1] in {"entferne", "remove"}
+        if remove:
+            target = re.sub(r"^(?:sichtbaren?|eingeblendeten?|visible|loaded)\s+", "", target)
+            if layer_relative_name.fullmatch(target):
+                return "remove_layer"
         if result_number.match(target) or catalog_id.match(target) or layer_name.match(target):
-            return "remove_layer" if command[1] in {"entferne", "remove"} else "add_layer"
+            return "remove_layer" if remove else "add_layer"
     return None
 
 
@@ -208,8 +214,12 @@ def tool_choice_for(chat, message, mutation):
             return {"type": "function", "function": {"name": "present_layer_results"}}
         return "auto"
     if not mutation and not metadata_request.search(message):
+        layer_overview = re.fullmatch(
+            r"(?:zeig(?:e)?|show)\s+(?:(?:mir|me)\s+)?(?:(?:die|the)\s+)?"
+            r"(?:layer|layers|ebenen)\s+(?:auf (?:der|meiner|dieser) karte|on (?:the|my) map)[.!?]?", message
+        )
         if ("get_visible_layers" not in prior_calls and re.search(r"\b(?:layer|layers|ebenen?|karten|maps)\b", message)
-            and re.search(r"\b(?:sichtbar\w*|eingeblendet\w*|geladen\w*|visible|loaded|enabled)\b", message)):
+            and (layer_overview or re.search(r"\b(?:sichtbar\w*|eingeblendet\w*|geladen\w*|visible|loaded|enabled)\b", message))):
             return {"type": "function", "function": {"name": "get_visible_layers"}}
         if ("get_map_state" not in prior_calls and re.search(r"\b(?:karte|map)\b", message)
             and re.search(r"\b(?:koordinatenreferenzsystem|koordinatensystem|crs|massstab|maßstab|scale|zentriert|centered)\b", message)):
@@ -220,7 +230,7 @@ def tool_choice_for(chat, message, mutation):
     name = mutation or ("get_layer_details" if metadata_request.search(message) else None)
     if not name or name in prior_calls:
         return "auto"
-    named = not numbered and layer_name.search(message)
+    named = not numbered and (layer_name.search(message) or layer_relative_name.search(message))
     if not chat.rounds:
         if numbered or catalog_id.search(message) or name == "zoom_to_lv95":
             return {"type": "function", "function": {"name": name}}
@@ -319,12 +329,13 @@ async def chat(request: Request):
             name = tool_choice["function"]["name"]
             if any(call.function.name != name for call in calls):
                 raise ValueError("unexpected tool")
-            if not schemas[name]["properties"]:
-                # Infomaniak can add unused fields to a forced argument-free read.
-                for call in calls:
-                    if not isinstance(json.loads(call.function.arguments), dict):
-                        raise ValueError("invalid read tool arguments")
-                    call.function.arguments = "{}"
+        # Infomaniak can add unused fields to an argument-free read.
+        for call in calls:
+            schema = schemas.get(call.function.name)
+            if schema and not schema["properties"]:
+                if not isinstance(json.loads(call.function.arguments), dict):
+                    raise ValueError("invalid read tool arguments")
+                call.function.arguments = "{}"
         searches += check_calls(calls, used_ids)
         if calls and (len(payload.rounds) + 1 >= limits["rounds"] or len(used_ids) > limits["calls"]
                       or searches > limits["searches"]):

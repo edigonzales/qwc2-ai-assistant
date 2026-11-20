@@ -95,3 +95,14 @@ Lokal bestanden 45 Node- und 22 SDK-Tests, ESLint und der Compose-Build.
 Chromium prüfte den frischen Kartenzustand und die Layerübersicht,
 typografische Anführungszeichen, die Themensuche ohne Kartenänderung,
 den gemischten 404-/Erfolgsfall und den vollständigen Kartenablauf.
+
+Nachprüfung von `6c62d88f81928d7ccdbffaf11221e56d3d1ad88d`: **FAIL** mit
+OpenCode 2.0.28 und `deepseek/deepseek-flash` bei 45 Node- und 22 SDK-Tests.
+Die Nachbesserung erkennt beim Entfernen auch «den sichtbaren Layer …»
+und «den Layer, der … heisst». Die Abfrage «Zeige die Layer auf der Karte»
+verlangt ebenfalls frische Daten. Überzählige Provider-Felder werden bei
+parameterlosen Modellaufrufen in jeder Runde verworfen. Lokal bestanden
+45 Node- und 23 SDK-Tests und der Neubau des Assistenzdienstes. Chromium
+bestätigte beide Entfernungsvarianten und die frische Layerübersicht
+mit Infomaniak, echtem Katalog und QWC2. Der vollständige Kartenablauf
+und die Abfrage des LV95-Kartenzustands wurden auf diesem Stand wiederholt.

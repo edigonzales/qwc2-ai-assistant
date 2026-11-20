@@ -4,7 +4,7 @@ Am 20. November 2026 in Chromium über die native QWC2-Seitenleiste gemessen.
 Verwendet wurden der mitgelieferte Entwicklungs-Harvest, die echte Quarkus-API
 und Infomaniak mit `Qwen/Qwen3.8-27B-FP8` bei `temperature=0.2` und
 `reasoning_effort=none`. Jede Frage begann mit leerem Chatverlauf. Die Tabelle
-zeigt den letzten Wiederholungslauf auf dem S4-Produktstand.
+zeigt den letzten vollständigen Lauf auf S4-Stand `13e967c`.
 Die Erwartungsbereiche in der zweiten Spalte wurden vor der Messung anhand
 von Katalog-IDs festgelegt. Kandidaten und angezeigte Treffer sind Messwerte.
 [Infomaniak Chat Completions](https://developer.infomaniak.com/docs/api/post/2/ai/%7Bproduct_id%7D/openai/v1/chat/completions)
