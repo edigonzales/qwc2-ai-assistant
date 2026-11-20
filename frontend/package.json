@@ -46,7 +46,7 @@
         "iconfont": "npx qwc_build_iconfont",
         "tsupdate": "npx qwc_update_translations",
         "start:remote": "npm run tsupdate && npm run iconfont && webpack serve --mode development",
-        "test:remote": "node --test dev/*.test.cjs server/*.test.cjs",
+        "test:remote": "node --test dev/*.test.cjs dev/*.test.mjs server/*.test.cjs",
         "build:remote": "npm run tsupdate && npm run iconfont && webpack --mode production"
     }
 }
