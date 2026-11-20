@@ -4,7 +4,7 @@ import MapUtils from 'qwc2/utils/MapUtils';
 
 import {themeLayerRestorer} from '../../themeLayerRestorer';
 import {mapLayers} from './layers.mjs';
-import {createTools} from './tools.mjs';
+import {createTurnTools} from './tools.mjs';
 
 function restore(name, theme, signal) {
     return new Promise((resolve, reject) => {
@@ -23,21 +23,24 @@ function restore(name, theme, signal) {
     });
 }
 
-export function createQwcTools(store, options = {}) {
+export function createQwcTurnTools(store, options = {}) {
     const layers = mapLayers(store, {
         roles: LayerRole, addThemeSublayer, changeLayerProperty, removeLayer, restore, baseUrl: window.location.href
     });
+
+    let boundsBeforeZoom;
 
     function getState() {
         const {theme, map} = store.getState();
         if (!theme.current || theme.switching || !map.size) throw new Error('mapNotReady');
         const scale = MapUtils.computeForZoom(map.scales, map.zoom);
+        const extent = map.bbox?.bounds;
         return {
             theme: {id: theme.current.id, title: theme.current.title},
             crs: map.projection,
             center: map.center,
             scale: Number.isFinite(scale) ? Math.round(scale) : null,
-            extent: map.bbox?.bounds ?? null
+            extent: extent === boundsBeforeZoom ? null : extent ?? null
         };
     }
 
@@ -47,11 +50,13 @@ export function createQwcTools(store, options = {}) {
         if (!map.size || map.scales.length < 2) throw new Error('mapNotReady');
         const boundedScale = Math.max(map.scales.at(-1), Math.min(map.scales[0], scale));
         const zoomLevel = MapUtils.computeZoom(map.scales, boundedScale);
+        // The view reports the new extent asynchronously after the reducer centers the map.
+        boundsBeforeZoom = map.bbox?.bounds;
         // QWC's reducer transforms the coordinate from the input CRS to the map CRS.
         store.dispatch(zoomToPoint([easting, northing], zoomLevel, 'EPSG:2056'));
         const state = getState();
         return {crs: state.crs, center: state.center, scale: state.scale};
     }
 
-    return createTools({...options, map: {...layers, getState, zoom}});
+    return createTurnTools({...options, map: {...layers, getState, zoom}});
 }

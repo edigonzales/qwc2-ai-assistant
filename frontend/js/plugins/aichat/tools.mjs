@@ -40,7 +40,7 @@ export function numberedLayer(results, number) {
     return Number.isInteger(number) && number > 0 ? results[number - 1] ?? null : null;
 }
 
-export function createTools({map, fetchImpl = fetch, signal, onResults = () => {}}) {
+export function createTurnTools({map, fetchImpl = fetch, signal, onResults = () => {}}) {
     const candidates = new Map();
     let calls = 0;
     let searches = 0;
@@ -60,7 +60,14 @@ export function createTools({map, fetchImpl = fetch, signal, onResults = () => {
         }
         if (response.status === 404) throw new Error('layerUnknown');
         if (!response.ok) throw new Error('catalogUnavailable');
-        const data = await response.json().catch(() => { throw new Error('invalidCatalog'); });
+        let data;
+        try {
+            data = await response.json();
+        } catch {
+            signal?.throwIfAborted();
+            if (timeout.aborted) throw new Error('catalogUnavailable');
+            throw new Error('invalidCatalog');
+        }
         signal?.throwIfAborted();
         return data;
     }
@@ -73,8 +80,7 @@ export function createTools({map, fetchImpl = fetch, signal, onResults = () => {
         for (const row of rows.slice(0, limits.perSearch)) {
             if (candidates.size >= limits.candidates) break;
             const layer = catalogLayer(row, 180);
-            if (!layer) throw new Error('invalidCatalog');
-            if (!candidates.has(layer.id)) {
+            if (layer && !candidates.has(layer.id)) {
                 candidates.set(layer.id, layer);
                 const {id, title, themeTitle, description} = layer;
                 found.push({id, title, themeTitle, description});
