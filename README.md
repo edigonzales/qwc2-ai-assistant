@@ -42,7 +42,8 @@ Für den Chat `INFOMANIAK_API_TOKEN`, `INFOMANIAK_PRODUCT_ID` und
 diese Werte an FastAPI. Das Modell muss auf dem gewählten Produkt
 verfügbar sein und Function Calling unterstützen.
 Mit `Qwen/Qwen3.8-27B-FP8` wurden Modellliste, Text und Function Calling
-am konfigurierten Testprodukt geprüft. [Infomaniak API](https://developer.infomaniak.com/docs/api/post/2/ai/%7Bproduct_id%7D/openai/v1/chat/completions)
+am konfigurierten Testprodukt mit `temperature=0.2` und
+`reasoning_effort=none` geprüft. [Infomaniak API](https://developer.infomaniak.com/docs/api/post/2/ai/%7Bproduct_id%7D/openai/v1/chat/completions)
 
 ## Karte und Chat
 

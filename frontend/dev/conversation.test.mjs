@@ -68,7 +68,14 @@ test('a visible QWC name cannot substitute for a catalog ID', async() => {
     const executed = [];
     const turn = await runConversation({
         message: 'Entferne den sichtbaren Layer', history: [], lastResults: [],
-        fetchImpl: () => steps.shift(),
+        fetchImpl: (_url, options) => {
+            if (steps.length === 3) {
+                assert.deepEqual(JSON.parse(options.body).rounds[0].results[1], {
+                    tool_call_id: 'r', content: '{"ok":false,"error":"unknownCandidate"}'
+                });
+            }
+            return steps.shift();
+        },
         runTool: (name, args) => {
             if (name === 'get_visible_layers') return {layers: [{qwcLayerName: 'qwc.alias', title: 'QWC-Titel'}]};
             if (name === 'search_layers') return {layers: [{id: 'catalog.id', title: 'QWC-Titel'}]};
@@ -77,7 +84,7 @@ test('a visible QWC name cannot substitute for a catalog ID', async() => {
         }
     });
     assert.deepEqual(executed, ['catalog.id']);
-    assert.deepEqual(turn.errors, ['unknownCandidate']);
+    assert.deepEqual(turn, {assistant: 'Layer entfernt.', errors: []});
 });
 
 test('the browser stops before executing a fourth-round or excess batch', async() => {

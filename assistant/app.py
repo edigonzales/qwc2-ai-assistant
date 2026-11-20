@@ -17,6 +17,11 @@ tools = definition["tools"]
 limits = definition["limits"]
 schemas = {entry["function"]["name"]: entry["function"]["parameters"] for entry in tools}
 id_schema = schemas["get_layer_details"]["properties"]["id"]
+metadata_request = re.compile(
+    r"\b(?:informationen|information|infos|details|metadaten|metadata|beschreibung|description|legende|legend)\b",
+    re.IGNORECASE
+)
+map_mutations = {"add_layer", "remove_layer", "zoom_to_lv95"}
 system_prompt = """You are the assistant for the Solothurn QWC2 map. Reply in the user's language and use plain text.
 Use the supplied tools to read the actual map or change it only as explicitly requested.
 Never invent map state, catalog entries, IDs, tool execution or success. Use real IDs from
@@ -29,16 +34,16 @@ A visible layer name is a QWC name, which can differ from its catalog ID. Use
 search_layers to find a catalog ID when you only know the QWC name or title.
 
 For a thematic search, usually one or two short, targeted German search phrases suffice.
-Make any synonym searches together in the first tool batch. If a search found no candidates
-and search is still required, try a different, shorter phrase with a common synonym.
-The hard maximum is three
-search_layers calls for the entire turn, and a fourth makes the request fail. Lucene returns
+Make synonym searches together in the first tool batch. If all first searches found no
+candidates and the server requires a retry, use a shorter phrase with a different synonym.
+The hard maximum is three search_layers calls, and a fourth makes the request fail. Lucene returns
 at most 20 new candidates per query and 40 in total. After receiving the search results,
 rank only those candidates and call present_layer_results with up to ten relevant IDs in
 ranked order. After presentation give a short final reply.
 If nothing fits, present an empty list, explain the uncertainty and suggest a more
 specific question. The UI displays the numbered list; summarize briefly.
 
+The UI shows the verified count or a suggestion for refining an empty search.
 For a numbered follow-up, use the exact ID at that position of the latest presented list.
 Use get_layer_details for metadata, add_layer to show it, and remove_layer to remove it.
 Keep that list intact unless the user explicitly asks for a new search. Describe only
@@ -182,10 +187,9 @@ def tool_choice_for(chat):
     if numbered and not chat.last_results:
         return "auto"
     has_target = numbered is not None or re.search(r"\b(?:ch\.[a-z0-9_.:-]+|id\s+[a-z0-9_.:-]+)\b", message)
-    named_layer = not numbered and re.search(r"\b(?:layer|ebene)\s+(?!(?:auf|von|on|from)\b)\w", imperative)
+    named_layer = not numbered and re.search(r"\b(?:layer|ebene)\s+(?!(?:auf|von|in|im|on|from|an|are|sind)\b)\w", imperative)
 
-    read_request = re.search(r"\b(?:informationen|information|infos|details|metadaten|metadata|beschreibung|description|legende|legend)\b", message)
-    if read_request:
+    if metadata_request.search(message):
         name = "get_layer_details"
     elif re.search(r"\b(?:liste|trefferliste|ergebnisliste|list|verlauf|history)\b", message):
         return "auto"
@@ -196,7 +200,7 @@ def tool_choice_for(chat):
         name = "remove_layer"
     elif (re.match(r"^(?:aktiviere|blende|enable)\b", imperative) or
           (re.match(r"^(?:zeig(?:e)?|show)\b", imperative) and (
-              re.search(r"\b(?:auf (?:der|meiner|dieser) karte|on (?:the|my) map|an[.!]?$)", imperative) or
+              named_layer or re.search(r"\b(?:auf (?:der|meiner|dieser) karte|on (?:the|my) map|an[.!]?$)", imperative) or
               re.fullmatch(r"(?:zeig(?:e)?|show)(?:\s+mir)?\s+" + ordinal + r"[.!]?", imperative)))):
         name = "add_layer"
     else:
@@ -254,11 +258,13 @@ async def chat(request: Request):
         raise HTTPException(400, "invalidConversation") from exc
 
     tool_choice = tool_choice_for(payload)
+    blocked_tools = map_mutations if metadata_request.search(payload.message) else set()
+    available_tools = [tool for tool in tools if tool["function"]["name"] not in blocked_tools]
     client, model = infomaniak_client()
     try:
         async with client, asyncio.timeout(30):
             response = await client.chat.completions.create(
-                model=model, messages=messages, tools=tools, stream=False, max_tokens=1600,
+                model=model, messages=messages, tools=available_tools, stream=False, max_tokens=1600,
                 temperature=0.2, reasoning_effort="none", tool_choice=tool_choice
             )
     except (APITimeoutError, TimeoutError) as exc:
@@ -288,6 +294,8 @@ async def chat(request: Request):
             raise ValueError("invalid response content")
         fields = {"id": True, "type": True, "function": {"name", "arguments"}}
         calls = [Call.model_validate(call.model_dump(include=fields)) for call in raw_calls or []]
+        if any(call.function.name in blocked_tools for call in calls):
+            raise ValueError("unexpected tool for metadata request")
         if tool_choice != "auto" and not calls:
             raise ValueError("required tool call missing")
         if tool_choice == "required" and any(call.function.name != "search_layers" for call in calls):

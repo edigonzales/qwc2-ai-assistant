@@ -12,12 +12,12 @@ Die Erwartungsbereiche wurden vor der Messung anhand von Katalog-IDs festgelegt.
 |---|---|---:|---:|---|
 | Suche Karten zu Grundwasserschutzzonen für die Trinkwasserversorgung im Kanton Solothurn. | Gewässerschutz oder Grundwasserschutz der Nutzungsplanung | 3 | 3 | Rang 1 `ch.so.arp.nutzungsplanung.grundwasserschutz` |
 | Welche Karten zeigen Überschwemmungsgefahren bei Hochwasser? | Wassergefahren oder Fliesstiefen des Naturgefahrenkatasters | 4 | 4 | Rang 1 `ch.so.afu.naturgefahren.fliesstiefen_30` |
-| Suche die Karte der politischen Gemeindegrenzen. | Politische Gemeindegrenzen | 5 | 5 | Rang 1 `ch.so.agi.gemeindegrenzen` |
+| Suche die Karte der politischen Gemeindegrenzen. | Politische Gemeindegrenzen | 12 | 5 | Rang 1 `ch.so.agi.gemeindegrenzen` |
 | Wo ist Strassenverkehrslärm in Solothurn kartiert? | Solothurner Strassenlärm-Daten | 6 | 5 | Rang 1 `ch.so.avt.strassenlaerm` |
 | Suche Karten zu offiziellen Wanderwegen. | Kantonale Wanderwege oder Wanderland | 9 | 9 | Rang 1 `ch.so.arp.wanderwege` |
 | Welche Karten zeigen Haltestellen von Bus und Bahn? | Solothurner ÖV-Haltestellen | 2 | 2 | Rang 1 `ch.so.avt.oev.haltestellen` |
 | Suche digitale Terrainmodelle auf Basis von LiDAR-Aufnahmen. | Solothurner LiDAR-Terrainmodelle | 13 | 10 | Rang 1 `ch.so.agi.lidar.dtm` |
-| Welche Karten zeigen Bauzonen und die kommunale Grundnutzung? | Bauzonengrenzen oder Grundnutzung | 19 | 10 | Rang 1 `ch.so.arp.nutzungsplanung.grundnutzung` |
+| Welche Karten zeigen Bauzonen und die kommunale Grundnutzung? | Bauzonengrenzen oder Grundnutzung | 20 | 10 | Rang 1 `ch.so.arp.nutzungsplanung.grundnutzung` |
 | Suche die landwirtschaftlichen Fruchtfolgeflächen. | Landwirtschaftliche Fruchtfolgeflächen | 2 | 2 | Rang 1 `ch.so.alw.fruchtfolgeflaechen` |
 | Welche Karten zeigen Auen und Flachmoore? | Bundesinventar Auen und Flachmoore | 3 | 3 | Rang 1 `ch.bafu.bundesinventare-auen`, Rang 2 `ch.bafu.bundesinventare-flachmoore` |
 
@@ -29,8 +29,8 @@ Die Erwartungsbereiche wurden vor der Messung anhand von Katalog-IDs festgelegt.
 - **Strassenlärm** `ch.so.avt.strassenlaerm`, `ch.so.avt.strassenlaermkataster`, `ch.so.avt.strassenlaermflaechen_tag`, `ch.so.avt.strassenlaermflaechen_nacht`, `ch.so.arp.nutzungsplanung.laerm`
 - **Wanderwege** `ch.so.arp.wanderwege`, `ch.so.arp.wanderwege_mit_sperrungen_umleitungen`, `ch.astra.wanderland`, `ch.astra.wanderland-sperrungen_umleitungen`, `ch.so.arp.wanderwege.signalisation`, `ch.so.arp.wanderwege.routen`, `ch.so.awjf.waldwanderwege`, `ch.so.awjf.waldwanderwege_wanderwege`, `ch.so.awjf.waldwanderwege_posten`
 - **ÖV-Haltestellen** `ch.so.avt.oev.haltestellen`, `ch.so.avt.oev.haltestellen_beschriftung`
-- **LiDAR-Terrain** `ch.so.agi.lidar.dtm`, `ch.so.agi.lidar_2014.dtm`, `ch.so.agi.lidar_2019.dtm`, `ch.bl.agi.lidar_2018.dtm`, `ch.so.agi.lidar.dtm_relief`, `ch.so.agi.lidar_2014.dtm_relief`, `ch.so.agi.lidar_2019.dtm_relief`, `ch.bl.agi.lidar_2018.dtm_relief`, `ch.so.agi.lidar.dtm_slope`, `ch.so.agi.lidar_2014.dtm_slope`
-- **Bauzonen** `ch.so.arp.nutzungsplanung.grundnutzung`, `ch.so.arp.nutzungsplanung.grundnutzung_so`, `ch.so.arp.nutzungsplanung.grundnutzung_ch`, `ch.so.arp.bauzonengrenzen`, `ch.so.arp.stabilisierungsziel_rpg2.bauzonen`, `ch.so.arp.nutzungsplanung`, `ch.so.arp.richtplan.grundnutzung_richtplankarte`, `ch.so.arp.nutzungsplanung.gewaesser.grundnutzung`, `ch.so.arp.nutzungsplanung.wald.grundnutzung`, `ch.so.arp.richtplan.grundnutzung_reservezonen`
+- **LiDAR-Terrain** `ch.so.agi.lidar.dtm`, `ch.so.agi.lidar_2014.dtm`, `ch.bl.agi.lidar_2018.dtm`, `ch.so.agi.lidar_2019.dtm`, `ch.so.agi.lidar.dtm_relief`, `ch.so.agi.lidar_2014.dtm_relief`, `ch.bl.agi.lidar_2018.dtm_relief`, `ch.so.agi.lidar_2019.dtm_relief`, `ch.so.agi.lidar.dtm_slope`, `ch.so.agi.lidar_2014.dtm_slope`
+- **Bauzonen** `ch.so.arp.nutzungsplanung.grundnutzung`, `ch.so.arp.nutzungsplanung.grundnutzung_so`, `ch.so.arp.nutzungsplanung.grundnutzung_ch`, `ch.so.arp.bauzonengrenzen`, `ch.so.arp.stabilisierungsziel_rpg2.bauzonen`, `ch.so.arp.arbeitszonenbewirtschaftung.arbeitszonen`, `ch.so.arp.nutzungsplanung`, `ch.so.arp.richtplan.grundnutzung_richtplankarte`, `ch.so.arp.nutzungsplanung.wald.grundnutzung`, `ch.so.arp.nutzungsplanung.gewaesser.grundnutzung`
 - **Fruchtfolgeflächen** `ch.so.alw.fruchtfolgeflaechen`, `ch.so.arp.richtplan.ueberlagernd_flaeche_bestehend`
 - **Auen und Flachmoore** `ch.bafu.bundesinventare-auen`, `ch.bafu.bundesinventare-flachmoore`, `ch.so.arp.naturschutzobjekte.flachmoore_regionaler_bedeutung`
 

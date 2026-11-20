@@ -134,6 +134,23 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(tool_choice_for(Chat(message="Zeige Layer 2 auf der Karte.", last_results=matches))["function"]["name"],
                          "add_layer")
 
+    def test_metadata_auto_mode_excludes_map_mutations(self):
+        response = self.send({"message": "Zeige die Legende der Gemeindegrenzen."},
+                             httpx.Response(200, json=completion(calls=[call("add_layer", arguments={"id": "gemeinden"})])))
+        self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+        self.assertEqual(self.requests[0]["tool_choice"], "auto")
+        names = {tool["function"]["name"] for tool in self.requests[0]["tools"]}
+        self.assertIn("get_layer_details", names)
+        self.assertTrue(names.isdisjoint({"add_layer", "remove_layer", "zoom_to_lv95"}))
+
+    def test_named_show_without_map_suffix_starts_with_catalog_search(self):
+        message = "Zeige den Layer Gemeindegrenzen."
+        self.assertEqual(tool_choice_for(Chat(message=message))["function"]["name"], "search_layers")
+        search = step(call("search_layers", "search", {"query": "Gemeindegrenzen"}))
+        search["results"][0]["content"] = '{"ok":true,"data":{"layers":[{"id":"ch.so.agi.gemeindegrenzen"}]}}'
+        self.assertEqual(tool_choice_for(Chat(message=message, rounds=[search]))["function"]["name"], "add_layer")
+        self.assertEqual(tool_choice_for(Chat(message="Zeige die sichtbaren Layer im Kartenausschnitt.")), "auto")
+
     def test_explicit_search_rejects_an_unverified_text_list_and_requires_presentation(self):
         message = "Suche Karten zu Wasser und Grundwasser."
         response = self.send({"message": message},

@@ -27,8 +27,9 @@ und die Gleichsetzung von QWC-Layernamen mit Katalog-IDs. Der Reviewer führte
 Die Korrektur bindet klare Metadatenfragen an das Detail-Tool, verwendet
 ein gemeinsames Muster für Trefferpositionen und verlangt bei einem blossen
 QWC-Layernamen die Katalogauflösung. Explizite Themensuchen brauchen einen
-echten Katalogaufruf und eine validierte Trefferliste. Bei einer leeren
-erfolgreichen Suche bleibt innerhalb des Budgets Platz für ein Synonym.
+echten Katalogaufruf und eine validierte Trefferliste. Bei zunächst leeren,
+erfolgreichen Suchen fordert der Server eine zweite Suchrunde mit einem
+Synonym an, sofern das Suchbudget dies erlaubt.
 
 Lokal bestanden 44 Node- und 17 isolierte Python-SDK-Tests, ESLint für den
 Chatcode, der Compose-Build und die Compose-Konfigurationsprüfung. Die native
@@ -43,3 +44,19 @@ und eine isoliert unterbrochene Infomaniak-Verbindung wurden im Browser
 geprüft. Die Dienstkonfiguration wurde danach wiederhergestellt. Die
 [Suchmessung](search-quality.md) enthält die tatsächlichen IDs und Ränge
 von zehn Fachfragen im unvollständigen Entwicklungs-Harvest.
+
+Nachprüfung von `48ff5873d050a7ca638ce7e01959e8db1ceabf43`: **PASS** mit
+OpenCode 2.0.28 und `deepseek/deepseek-flash`, 44 Node- und 17 isolierte
+SDK-Tests sowie Gegenproben zu Tool-Auswahl, leerer Suche und Proxy-Pfaden.
+Das Review fand, dass die Meldung zu einer abgelehnten Modell-ID eine
+später erfolgreich ausgeführte Aktion verdeckte. Die Nachbesserung hebt
+diese Meldung auf, wenn dasselbe Tool anschliessend erfolgreich ausgeführt
+wurde. Für erkannte Metadatenanfragen sind Kartenänderungen ausgeschlossen.
+«Zeige den Layer Gemeindegrenzen» löst wieder die Katalogauflösung aus.
+Die Laufzeitparameter wurden mit dem dokumentierten Qwen-Modell geprüft.
+Lokal erneut bestanden 44 Node- und 19 isolierte SDK-Tests, ESLint,
+Compose-Build, der vollständige Kartenablauf und der Suchlauf mit zehn
+Fragen. Ein gezielter Chromium-Test verwendete für die nachgebildete
+Fehlsequenz eine kontrollierte Modellantwort, den echten Quarkus-Katalog
+und QWC2-Redux. Die Metadaten- und Kartenbefehle wurden separat mit echtem
+Infomaniak erneut geprüft.
