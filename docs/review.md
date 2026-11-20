@@ -18,91 +18,17 @@ Basis `44eac18cf3ce839b67dd6f9ffed4a6e819ac1336`, geprüft `887c036f45b5beca4bde
 
 ## S4 · Nativer Chat und Suchmessung
 
-Basis `66f7b13e3fa695bf86b21768bcb8a28507d5f73b`, Erstprüfung
-`cebdf4bf9ad1b708e60e293df6c82840efc4eb39` mit OpenCode 2.0.28 und
-`deepseek/deepseek-flash` ergab **FAIL**. Das Review fand Metadatenfragen,
-die einen Layer aktivieren konnten, zu enge Erkennung von Trefferpositionen
-und die Gleichsetzung von QWC-Layernamen mit Katalog-IDs. Der Reviewer führte
-42 Node- und 14 isolierte SDK-Tests aus und prüfte Diff und Übersetzungen.
-Die Korrektur bindet klare Metadatenfragen an das Detail-Tool, verwendet
-ein gemeinsames Muster für Trefferpositionen und verlangt bei einem blossen
-QWC-Layernamen die Katalogauflösung. Explizite Themensuchen brauchen einen
-echten Katalogaufruf und eine validierte Trefferliste. Bei zunächst leeren,
-erfolgreichen Suchen fordert der Server eine zweite Suchrunde mit einem
-Synonym an, sofern das Suchbudget dies erlaubt.
+Phasenbasis `66f7b13e3fa695bf86b21768bcb8a28507d5f73b`. Jede Prüfung lief in einem separaten detached Worktree mit OpenCode 2.0.28 und `deepseek/deepseek-flash`.
 
-Lokal bestanden 44 Node- und 17 isolierte Python-SDK-Tests, ESLint für den
-Chatcode, der Compose-Build und die Compose-Konfigurationsprüfung. Die native
-Seitenleiste wurde in Chromium auf Desktop und Mobilgrösse geprüft. Host- und
-Compose-Modus verwendeten echte Live-Karte, Quarkus und Infomaniak. Im letzten
-Compose-Lauf bestätigten Redux und URL den Kartenzustand, Gemeindegrenzen
-ohne Duplikat, Entfernen und LV95-Zentrierung. Die Wassersuche zeigte zehn
-Katalogtreffer. Details, Anzeige und Entfernen per Titel oder Trefferposition
-wurden geprüft. Direktklicks lösten keinen zusätzlichen Modellaufruf aus.
-Unbekannte ID, Abbruch eines laufenden Katalogzugriffs, gestoppter Quarkus
-und eine isoliert unterbrochene Infomaniak-Verbindung wurden im Browser
-geprüft. Die Dienstkonfiguration wurde danach wiederhergestellt. Die
-[Suchmessung](search-quality.md) enthält die tatsächlichen IDs und Ränge
-von zehn Fachfragen im unvollständigen Entwicklungs-Harvest.
+| Geprüfter Commit | Urteil | Befunde und Korrekturen |
+|---|---|---|
+| `cebdf4bf9ad1b708e60e293df6c82840efc4eb39` | FAIL | Metadatenfragen konnten Layer aktivieren. Ordinale waren zu eng erkannt und QWC-Namen wurden mit Katalog-IDs gleichgesetzt. Die Korrektur trennt Lesebefehle und Kartenaktionen, teilt das Muster für Trefferpositionen und löst QWC-Namen über den Katalog auf. |
+| `48ff5873d050a7ca638ce7e01959e8db1ceabf43` | PASS | Verifizierte Suchtreffer und ein Synonymversuch bei leeren Lucene-Antworten waren bestätigt. Die Anzeige eines abgelehnten Modellvorschlags konnte eine nachfolgend erfolgreiche Aktion verdecken. |
+| `602dbe4d869938e41f4bc16778abad0889477414` | FAIL | Der Versuch, den Fehler auszublenden, konnte einen echten Teilerfolg als vollen Erfolg zeigen. Offene Layerfragen konnten Kartenwerkzeuge erhalten. Die Korrektur zeigt bestätigte Aktionen und Fehlermeldungen separat und gibt Kartenwerkzeuge nur bei erkannten Befehlen frei. |
+| `13e967c177b7a449dc29065370505a477183976e` | FAIL | Mehrdeutige Layerübersichten konnten eine Aktion freigeben. Die Korrektur bindet Befehlsverb und Ziel, trennt Layerübersicht und Themensuche und erkennt typografische Anführungszeichen. |
+| `6c62d88f81928d7ccdbffaf11221e56d3d1ad88d` | FAIL | Zwei explizite Entfernungsvarianten gingen verloren. «Zeige die Layer auf der Karte» konnte sich noch auf ältere Angaben stützen. Bei parameterlosen Modellaufrufen konnten zusätzliche Felder ausserhalb erzwungener Aufrufe die Verarbeitung abbrechen. |
+| `ce32b7f0dde9a999d986a6479cba211c08a35f39` | **PASS** | Beide Entfernungsvarianten und die frische Layerübersicht bestätigt. Parameterlose Modellaufrufe werden vor der Validierung auf `{}` gesetzt, wenn der Provider ein JSON-Objekt geliefert hat. |
 
-Nachprüfung von `48ff5873d050a7ca638ce7e01959e8db1ceabf43`: **PASS** mit
-OpenCode 2.0.28 und `deepseek/deepseek-flash`, 44 Node- und 17 isolierte
-SDK-Tests sowie Gegenproben zu Tool-Auswahl, leerer Suche und Proxy-Pfaden.
-Das Review fand, dass die Meldung zu einer abgelehnten Modell-ID eine
-später erfolgreich ausgeführte Aktion verdeckte. Die Nachbesserung hebt
-diese Meldung auf, wenn dasselbe Tool anschliessend erfolgreich ausgeführt
-wurde. Für erkannte Metadatenanfragen sind Kartenänderungen ausgeschlossen.
-«Zeige den Layer Gemeindegrenzen» löst wieder die Katalogauflösung aus.
-Die Laufzeitparameter wurden mit dem dokumentierten Qwen-Modell geprüft.
-Lokal erneut bestanden 44 Node- und 19 isolierte SDK-Tests, ESLint,
-Compose-Build, der vollständige Kartenablauf und der Suchlauf mit zehn
-Fragen. Ein gezielter Chromium-Test verwendete für die nachgebildete
-Fehlsequenz eine kontrollierte Modellantwort, den echten Quarkus-Katalog
-und QWC2-Redux. Die Metadaten- und Kartenbefehle wurden separat mit echtem
-Infomaniak erneut geprüft.
+Im finalen Review bestanden 45 Node- und 23 isolierte SDK-Tests, beide Diff-Prüfungen und gezielte Gegenproben zu Tool-Freigabe, frischen Daten, Katalog-IDs und Kartenbestätigungen. Freiere Befehlsvarianten können ausserhalb der erkannten Formen liegen. Der Reviewer verwendete Offline-Tests und führte die Live-Prüfungen nicht erneut aus.
 
-Nachprüfung von `602dbe4d869938e41f4bc16778abad0889477414`: **FAIL** mit
-OpenCode 2.0.28 und `deepseek/deepseek-flash` bei 44 Node- und 19 SDK-Tests.
-Die Gegenproben zeigten eine verdeckte Fehlermeldung bei Teilerfolgen,
-eine mögliche Kartenänderung bei einer reinen Layerfrage und eine
-Lücke bei Namen in Anführungszeichen. Die Nachbesserung erlaubt je Turn
-nur das ausdrücklich angeforderte Kartenwerkzeug. Bei Teilerfolgen zeigt
-der Chat bestätigte Redux-Ergebnisse aus den tatsächlich ausgeführten
-Werkzeugen neben der Fehlermeldung. Layernamen in Anführungszeichen und
-«Nummer 2 anzeigen» werden unterstützt.
-Lokal bestanden 45 Node- und 20 isolierte SDK-Tests, ESLint und der
-Compose-Build. Chromium prüfte den Kartenablauf mit Infomaniak inklusive
-«Nummer 2 anzeigen», Desktop und Mobilgrösse. Eine reine Layerfrage und
-ein Layername in Anführungszeichen liefen mit dem echten Modell. Zum
-Teilerfolg zeigte ein gezielter Test mit vorgegebenen Modellaufrufen einen
-echten Quarkus-404 und eine bestätigte Entfernung in QWC2. Die Suchmessung
-enthält die Ergebnisse des letzten vollständigen Durchlaufs.
-
-Nachprüfung von `13e967c177b7a449dc29065370505a477183976e`: **FAIL** mit
-OpenCode 2.0.28 und `deepseek/deepseek-flash` bei 45 Node- und 20 SDK-Tests.
-Der Reviewer reproduzierte eine mögliche Layeraktivierung bei Fragen
-nach vorhandenen Kartenlayern und bei «Zeige Layer zum Thema Wasser».
-Die Korrektur bindet die Freigabe für eine Kartenaktion an ein konkretes
-Ziel unmittelbar nach dem Befehlsverb. Themensuchen zeigen Katalogtreffer,
-und Layerübersichten verwenden lesende Werkzeuge. Die Namensauflösung
-akzeptiert auch deutsche typografische Anführungszeichen. Die Oberfläche
-bestätigt Kartenänderungen aus den QWC2-Ergebnissen und kennzeichnet
-fehlgeschlagene Teilschritte gesondert.
-Explizite Kartenstatusfragen verlangen frische Daten. Bei erzwungenen
-parameterlosen Leseaufrufen werden überzählige Felder aus der tatsächlichen
-Provider-Antwort verworfen, bevor der Browser die Argumente validiert.
-Lokal bestanden 45 Node- und 22 SDK-Tests, ESLint und der Compose-Build.
-Chromium prüfte den frischen Kartenzustand und die Layerübersicht,
-typografische Anführungszeichen, die Themensuche ohne Kartenänderung,
-den gemischten 404-/Erfolgsfall und den vollständigen Kartenablauf.
-
-Nachprüfung von `6c62d88f81928d7ccdbffaf11221e56d3d1ad88d`: **FAIL** mit
-OpenCode 2.0.28 und `deepseek/deepseek-flash` bei 45 Node- und 22 SDK-Tests.
-Die Nachbesserung erkennt beim Entfernen auch «den sichtbaren Layer …»
-und «den Layer, der … heisst». Die Abfrage «Zeige die Layer auf der Karte»
-verlangt ebenfalls frische Daten. Überzählige Provider-Felder werden bei
-parameterlosen Modellaufrufen in jeder Runde verworfen. Lokal bestanden
-45 Node- und 23 SDK-Tests und der Neubau des Assistenzdienstes. Chromium
-bestätigte beide Entfernungsvarianten und die frische Layerübersicht
-mit Infomaniak, echtem Katalog und QWC2. Der vollständige Kartenablauf
-und die Abfrage des LV95-Kartenzustands wurden auf diesem Stand wiederholt.
+Lokal bestanden ESLint, Compose-Build und Compose-Konfigurationsprüfung. Chromium prüfte Host- und Compose-Betrieb, Desktop und Mobilgrösse, echten Kartenzustand, Hinzufügen ohne Duplikat, Entfernen, LV95-Zentrierung, Wassersuche, nummerierte Treffer, Direktklicks ohne Modellaufruf und unbekannte IDs. Die beiden korrigierten Entfernungsvarianten und der vollständige Kartenablauf wurden auf dem geprüften Produktcommit mit echtem Katalog, QWC2 und Infomaniak wiederholt. Für den gemischten 404-/Erfolgsfall steuerte eine vorgegebene Modellantwort einen echten Quarkus-404 und eine echte QWC2-Entfernung an. Abbruch während eines Katalogzugriffs, gestoppter Quarkus und die isoliert unterbrochene Infomaniak-Verbindung wurden im Browser geprüft. Danach wurden die Dienste wiederhergestellt. Die Laufzeitparameter wurden mit `Qwen/Qwen3.8-27B-FP8` geprüft. [Suchmessung mit zehn Fachfragen](search-quality.md)
