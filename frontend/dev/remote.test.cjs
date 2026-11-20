@@ -65,9 +65,10 @@ test('blocked request never contacts production', async t => {
     const res = await request(t, () => { throw new Error('must not run'); }, '/api/data/v1/x', {method: 'POST'});
     assert.equal(res.status, 403);
 });
-test('nested editing and login menu entries are removed', () => {
-    const config = adaptConfig({plugins: {desktop: [{name: 'TopBar', cfg: {menuItems: [{key: 'Tools', subitems: [{key: 'Editing'}, {key: 'Measure'}]}, {key: 'LoginMySoCh'}, {key: 'Kartenkatalog'}]}}]}});
+test('disabled plugins and their nested menu entries are removed', () => {
+    const config = adaptConfig({plugins: {desktop: [{name: 'TopBar', cfg: {menuItems: [{key: 'Tools', subitems: [{key: 'Editing'}, {key: 'Measure'}, {key: 'MapExport'}]}, {key: 'LoginMySoCh'}, {key: 'Kartenkatalog'}]}}, {name: 'MapExport'}]}});
     assert.deepEqual(config.plugins.desktop[0].cfg.menuItems, [{key: 'Tools', subitems: [{key: 'Measure'}]}]);
+    assert.deepEqual(config.plugins.desktop.map(plugin => plugin.name), ['TopBar']);
 });
 test('root redirect keeps query and targets local app', async t => {
     const res = await request(t, () => { throw new Error('must not run'); }, '/?l=example', {redirect: 'manual'});

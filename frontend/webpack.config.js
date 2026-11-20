@@ -14,7 +14,6 @@ const qwc2ModName = isQwcLts ? 'qwc2-lts' : 'qwc2';
 
 module.exports = (env, argv) => {
     const isProd = argv.mode === "production";
-    const remote = env.REMOTE === "1";
 
     return {
         entry: {
@@ -22,7 +21,7 @@ module.exports = (env, argv) => {
         },
         output: {
             hashFunction: 'sha256',
-            publicPath: remote ? '/map/' : 'auto',
+            publicPath: '/map/',
             path: path.resolve(__dirname, 'prod'),
             filename: 'dist/QWC2App.js',
             assetModuleFilename: 'dist/[hash][ext][query]',
@@ -39,18 +38,18 @@ module.exports = (env, argv) => {
             static: [
                 {
                     directory: path.resolve(__dirname, 'static'),
-                    publicPath: remote ? '/map/' : '/'
+                    publicPath: '/map/'
                 }
             ],
             compress: true,
             hot: true,
             liveReload: true,
-            host: remote ? "127.0.0.1" : "0.0.0.0",
-            port: remote ? Number(process.env.QWC_PORT || 8082) : 8080,
-            setupMiddlewares: remote ? (middlewares) => {
+            host: "127.0.0.1",
+            port: Number(process.env.QWC_PORT || 8082),
+            setupMiddlewares: (middlewares) => {
                 middlewares.unshift({name: "live-config", middleware: require("./server/remote.cjs").createRemoteMiddleware()});
                 return middlewares;
-            } : undefined
+            }
         },
         resolve: {
             extensions: [".mjs", ".js", ".jsx"],
@@ -69,7 +68,6 @@ module.exports = (env, argv) => {
             new webpack.DefinePlugin({
                 'process.env': {
                     NODE_ENV: JSON.stringify(argv.mode),
-                    RemoteDev: JSON.stringify(remote),
                     BuildDate: JSON.stringify(buildDate),
                     AvailableLanguages: JSON.stringify(availableLanguages)
                 }
@@ -78,7 +76,6 @@ module.exports = (env, argv) => {
             new HtmlWebpackPlugin({
                 template: path.resolve(__dirname, "index.html"),
                 build: buildDate,
-                remoteDev: remote,
                 hash: true
             }),
             new CopyWebpackPlugin({

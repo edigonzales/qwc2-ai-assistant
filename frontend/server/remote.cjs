@@ -1,7 +1,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const ORIGIN = 'https://geo.so.ch';
-const disabled = new Set(['NewsPopup', 'Login', 'Logout', 'LoginMySoCh', 'Authentication', 'Autologin', 'LoginUser', 'Editing', 'CCCInterface', 'Print', 'LegendPrint', 'LandRegisterExtract', 'PlotInfoTool', 'Share', 'Bookmark', 'HeightProfile', 'MapInfoTooltip', 'Kartenkatalog']);
+const disabled = new Set([
+    'NewsPopup', 'Login', 'Logout', 'LoginMySoCh', 'Authentication', 'Autologin', 'LoginUser',
+    'Editing', 'CCCInterface', 'Print', 'MapExport', 'LegendPrint', 'LandRegisterExtract',
+    'PlotInfoTool', 'Share', 'Bookmark', 'HeightProfile', 'MapInfoTooltip', 'Kartenkatalog'
+]);
 const catalogPath = /^\/catalog-api\/v1\/ebenen(?:\/[A-Za-z0-9_.:-]{1,200})?$/;
 
 function adaptConfig(input) {
@@ -33,7 +37,7 @@ function rewriteUrls(value) {
 }
 function allowed(url, method) {
     if (!['GET', 'HEAD'].includes(method)) return false;
-    if (url.pathname === '/ows/somap' || url.pathname === '/wms') {
+    if (url.pathname === '/ows/somap') {
         const requests = [...url.searchParams].filter(([key]) => key.toLowerCase() === 'request');
         return requests.length === 1 && ['getmap', 'getfeatureinfo', 'getlegendgraphic', 'getcapabilities'].includes(requests[0][1].toLowerCase());
     }
@@ -41,9 +45,10 @@ function allowed(url, method) {
 }
 function createRemoteMiddleware({fetchImpl = fetch, timeout = 10000, catalogOrigin = process.env.CATALOG_API_ORIGIN || 'http://127.0.0.1:8084', staticRoot = path.join(__dirname, '../static')} = {}) {
     return async (req, res, next) => {
+        let rawPath;
         let url;
         try {
-            const rawPath = decodeURIComponent(req.url.split('?')[0]);
+            rawPath = decodeURIComponent(req.url.split('?')[0]);
             if (!rawPath.startsWith('/') || rawPath.startsWith('//') || rawPath.includes('\\') || rawPath.includes('\0') || rawPath.split('/').some(part => part === '.' || part === '..')) {
                 throw new URIError();
             }
@@ -52,8 +57,8 @@ function createRemoteMiddleware({fetchImpl = fetch, timeout = 10000, catalogOrig
             res.writeHead(400); return res.end('Ungültiger Pfad');
         }
         const catalogRequest = url.pathname.startsWith('/catalog-api/');
-        const config = url.pathname === '/map/config.json';
-        const themes = url.pathname === '/map/themes.json';
+        const config = rawPath.toLowerCase() === '/map/config.json';
+        const themes = rawPath.toLowerCase() === '/map/themes.json';
         const definitions = url.pathname === '/api/dataproduct/v1/weblayers';
         const image = /^\/map\/(img|assets\/img)\//.test(url.pathname);
         const service = /^\/(api|ows|wms|auth|mysochauth|elevation)(\/|$)/.test(url.pathname) || url.pathname === '/map/editConfig.json';
@@ -72,8 +77,10 @@ function createRemoteMiddleware({fetchImpl = fetch, timeout = 10000, catalogOrig
             }
         }
         try {
+            const lang = url.searchParams.get('lang');
+            const liveQuery = config || themes ? (/^[a-z]{2}(?:-[A-Z]{2})?$/.test(lang ?? '') ? '?lang=' + lang : '') : url.search;
             const target = catalogRequest ? catalogOrigin.replace(/\/$/, '') + '/api' + url.pathname.slice('/catalog-api'.length) +
-                (url.search ? '?' + url.searchParams.toString() : '') : ORIGIN + url.pathname + url.search;
+                (url.search ? '?' + url.searchParams.toString() : '') : ORIGIN + (config || themes ? rawPath.toLowerCase() : url.pathname) + liveQuery;
             const upstream = await fetchImpl(target, {
                 method: catalogRequest ? req.method : 'GET', signal: AbortSignal.timeout(timeout), redirect: 'error',
                 headers: {Accept: catalogRequest ? 'application/json' : req.headers.accept || '*/*'}

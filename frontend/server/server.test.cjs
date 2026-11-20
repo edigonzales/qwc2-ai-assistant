@@ -10,7 +10,7 @@ async function fixture(t, fetchImpl = async () => { throw new Error('unexpected 
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'qwc-server-'));
     const root = path.join(dir, 'prod');
     await fs.mkdir(path.join(root, 'assets/img'), {recursive: true});
-    for (const [name, body] of Object.entries({'index.html': '<html>local</html>', 'app.js': 'local()', 'assets/img/logo.svg': '<svg/>', '.secret': 'secret'})) await fs.writeFile(path.join(root, name), body);
+    for (const [name, body] of Object.entries({'index.html': '<html>local</html>', 'config.json': '{}', 'app.js': 'local()', 'assets/img/logo.svg': '<svg/>', '.secret': 'secret'})) await fs.writeFile(path.join(root, name), body);
     await fs.writeFile(path.join(dir, 'outside'), 'secret');
     await fs.symlink(path.join(dir, 'outside'), path.join(root, 'escape'));
     const server = createServer({staticRoot: root, fetchImpl, catalogOrigin: 'http://catalog:8080'});
@@ -51,9 +51,15 @@ test('shares live adapter and catalog proxy with development mode', async t => {
         assert.equal(url, 'https://geo.so.ch/map/config.json?lang=de-CH');
         return Response.json({plugins: {desktop: [{name: 'Editing'}]}});
     });
-    const config = JSON.parse((await request('/map/config.json?lang=de-CH')).body);
+    const config = JSON.parse((await request('/map/%63onfig.json?lang=de-CH&tenant=other')).body);
     assert.deepEqual(config.plugins.desktop, []);
     assert.equal((await request('/catalog-api/v1/ebenen')).status, 200);
+});
+test('encoded live config has no local fallback if upstream is down', async t => {
+    const request = await fixture(t);
+    for (const route of ['/map/%63onfig.json', '/map/Config.json', '/map/Themes.json']) {
+        assert.equal((await request(route)).status, 502);
+    }
 });
 test('readiness depends on real backend health, assets survive backend outage', async t => {
     let up = false;
