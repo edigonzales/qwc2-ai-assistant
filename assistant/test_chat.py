@@ -100,6 +100,16 @@ class ChatTests(unittest.TestCase):
                 response = self.send({"message": "hi"}, httpx.Response(200, json=completion(calls=[request])))
                 self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
 
+    def test_malformed_provider_response_returns_a_stable_error(self):
+        for payload in [
+            completion(content=[{"type": "text", "text": "unexpected"}]),
+            completion(calls=call()),
+            {**completion("hi"), "choices": None},
+        ]:
+            self.requests.clear()
+            response = self.send({"message": "hi"}, httpx.Response(200, json=payload))
+            self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+
     def test_hallucinated_id_error_survives_as_a_failed_browser_result(self):
         item = call("present_layer_results", arguments={"ids": ["invented"]})
         failed = step(item)

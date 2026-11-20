@@ -204,19 +204,23 @@ async def chat(request: Request):
     try:
         choice = response.choices[0]
         message = choice.message
-        if choice.finish_reason in ("length", "content_filter"):
+        if message.role != "assistant" or choice.finish_reason in ("length", "content_filter"):
             raise ValueError("incomplete response")
-        count_before = len(used_ids)
+        raw_calls = message.tool_calls
+        content = message.content
+        if raw_calls is not None and not isinstance(raw_calls, list):
+            raise ValueError("invalid tool calls")
+        if content is not None and (not isinstance(content, str) or len(content) > limits["replyLength"]):
+            raise ValueError("invalid response content")
         fields = {"id": True, "type": True, "function": {"name", "arguments"}}
-        calls = [Call.model_validate(call.model_dump(include=fields)) for call in message.tool_calls or []]
+        calls = [Call.model_validate(call.model_dump(include=fields)) for call in raw_calls or []]
         searches += check_calls(calls, used_ids)
-        if calls and (len(payload.rounds) + 1 >= limits["rounds"] or count_before + len(calls) > limits["calls"]
+        if calls and (len(payload.rounds) + 1 >= limits["rounds"] or len(used_ids) > limits["calls"]
                       or searches > limits["searches"]):
             raise HTTPException(409, "chatLimit")
-        content = message.content
-        if (content is not None and len(content) > limits["replyLength"]) or (not calls and not (content or "").strip()):
-            raise ValueError("missing or oversized response")
+        if not calls and not (content or "").strip():
+            raise ValueError("missing response")
         return {"assistant": {"role": "assistant", "content": content,
                               "tool_calls": [call.model_dump() for call in calls]}}
-    except (IndexError, ValueError, RecursionError) as exc:
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError, RecursionError) as exc:
         raise HTTPException(502, "invalidModelResponse") from exc
