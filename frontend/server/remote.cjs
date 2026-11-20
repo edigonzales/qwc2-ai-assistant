@@ -120,20 +120,20 @@ function createRemoteMiddleware({
             res.writeHead(400); return res.end('Ungültiger Pfad');
         }
         if (rawPath.startsWith('/assistant-api/')) return proxyChat(req, res, assistantOrigin, fetchImpl);
-        const catalogRequest = url.pathname.startsWith('/catalog-api/');
+        const catalogRequest = rawPath.startsWith('/catalog-api/');
         const config = rawPath.toLowerCase() === '/map/config.json';
         const themes = rawPath.toLowerCase() === '/map/themes.json';
         const definitions = url.pathname === '/api/dataproduct/v1/weblayers';
         const image = /^\/map\/(img|assets\/img)\//.test(url.pathname);
         const service = /^\/(api|ows|wms|auth|mysochauth|elevation)(\/|$)/.test(url.pathname) || url.pathname === '/map/editConfig.json';
-        if (!['GET', 'HEAD'].includes(req.method) || (catalogRequest && !catalogPath.test(url.pathname)) || (service && !allowed(url, req.method))) {
+        if (!['GET', 'HEAD'].includes(req.method) || (catalogRequest && !catalogPath.test(rawPath)) || (service && !allowed(url, req.method))) {
             res.writeHead(403, {'Content-Type': 'text/plain; charset=utf-8'}); return res.end('Im anonymen Dev-Modus ist dieser Zugriff nicht freigegeben.');
         }
         if (url.pathname === '/') { res.writeHead(302, {Location: '/map/' + url.search}); return res.end(); }
         if (!(catalogRequest || config || themes || image || service)) return next();
         if (image && fs.existsSync(path.join(staticRoot, url.pathname.slice('/map/'.length)))) return next();
         if (catalogRequest) {
-            const listing = url.pathname === '/catalog-api/v1/ebenen';
+            const listing = rawPath === '/catalog-api/v1/ebenen';
             const keys = [...url.searchParams.keys()];
             if (new Set(keys).size !== keys.length || keys.some(key => !listing || !['q', 'sort'].includes(key)) ||
                 (url.searchParams.get('q') || '').length > 160 || ![null, 'relevance'].includes(url.searchParams.get('sort'))) {
@@ -143,7 +143,7 @@ function createRemoteMiddleware({
         try {
             const lang = url.searchParams.get('lang');
             const liveQuery = config || themes ? (/^[a-z]{2}(?:-[A-Z]{2})?$/.test(lang ?? '') ? '?lang=' + lang : '') : url.search;
-            const target = catalogRequest ? catalogOrigin.replace(/\/$/, '') + '/api' + url.pathname.slice('/catalog-api'.length) +
+            const target = catalogRequest ? catalogOrigin.replace(/\/$/, '') + '/api' + rawPath.slice('/catalog-api'.length) +
                 (url.search ? '?' + url.searchParams.toString() : '') : ORIGIN + (config || themes ? rawPath.toLowerCase() : url.pathname) + liveQuery;
             const upstream = await fetchImpl(target, {
                 method: catalogRequest ? req.method : 'GET', signal: AbortSignal.timeout(timeout), redirect: 'error',

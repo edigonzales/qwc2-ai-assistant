@@ -11,6 +11,7 @@
     "resultLength": 16000,
     "requestBytes": 131072
   },
+  "ordinalPattern": "\\b(?:nummer\\s*|number\\s*|nr\\.?\\s*|(?:layer|ebene)\\s+)([0-9]+)\\b",
   "tools": [
     {
       "type": "function",

@@ -25,9 +25,13 @@ against the catalog. Report tool errors and partial results honestly.
 For every new request about the current map, get fresh tool evidence. Earlier chat replies
 describe past state. For a show request, call add_layer even if that layer was shown earlier.
 Use exactly {} for get_map_state and get_visible_layers. They have no arguments.
+A visible layer name is a QWC name, which can differ from its catalog ID. Use
+search_layers to find a catalog ID when you only know the QWC name or title.
 
 For a thematic search, usually one or two short, targeted German search phrases suffice.
-Make any synonym searches together in the first tool batch. The hard maximum is three
+Make any synonym searches together in the first tool batch. If a search found no candidates
+and search is still required, try a different, shorter phrase with a common synonym.
+The hard maximum is three
 search_layers calls for the entire turn, and a fourth makes the request fail. Lucene returns
 at most 20 new candidates per query and 40 in total. After receiving the search results,
 rank only those candidates and call present_layer_results with up to ten relevant IDs in
@@ -153,37 +157,63 @@ def messages_for(chat):
 def tool_choice_for(chat):
     message = chat.message.strip().lower()
     imperative = re.sub(r"^(?:bitte|please)\s+", "", message)
-    numbered = re.search(r"\b(?:nummer|number|nr\.?)\s*([0-9]+)\b", message)
-    has_target = bool(re.search(r"\b(?:ch\.[a-z0-9_.:-]+|id\s+[a-z0-9_.:-]+)\b", message)) or (
-        numbered is not None and bool(chat.last_results)
+    search_request = (
+        re.match(r"^(?:such(?:e)?|find(?:e)?|search)\b(?!\s+(?:nicht|not)\b)", imperative)
+        or (re.match(r"^(?:welche|which)\b", imperative) and re.search(r"\b(?:karten|maps)\b", imperative)
+            and not re.search(r"\b(?:sichtbar|visible|geladen|eingeblendet)\b", imperative))
+        or re.search(r"\bkartiert\b", imperative)
     )
-    name = None
-    if not re.search(r"\b(?:nicht|nie|niemals|not|never|wenn|falls|if|unless)\b", message):
-        if has_target and re.search(r"\b(?:informationen|information|infos|details|metadaten|metadata)\b", message):
-            name = "get_layer_details"
-        elif not re.search(r"\b(?:liste|trefferliste|ergebnisliste|list|verlauf|history)\b", message):
-            if re.match(r"^(?:zeig(?:e)?|show|aktiviere|blende)\b", imperative):
-                name = "add_layer"
-            elif re.match(r"^(?:entferne|remove)\b", imperative):
-                name = "remove_layer"
-            elif (re.match(r"^(?:zentrier(?:e)?|zoom(?:e)?|center)\b", imperative) and "lv95" in message
-                  and len(re.findall(r"\b[0-9]+", message)) >= 3 and re.search(r"massstab|maßstab|scale|1\s*:", message)):
-                name = "zoom_to_lv95"
-    if not name or any(call.function.name == name for step in chat.rounds for call in step.calls):
+    prior_calls = {call.function.name for step in chat.rounds for call in step.calls}
+    search_outcomes = [json.loads(result.content) for step in chat.rounds
+                       for call, result in zip(step.calls, step.results) if call.function.name == "search_layers"]
+    if search_request:
+        if not chat.rounds:
+            return "required"
+        if (len(chat.rounds) == 1 and 0 < len(search_outcomes) < limits["searches"]
+                and all(outcome["ok"] and outcome.get("data") == {"layers": []} for outcome in search_outcomes)):
+            return {"type": "function", "function": {"name": "search_layers"}}
+        if "present_layer_results" not in prior_calls:
+            return {"type": "function", "function": {"name": "present_layer_results"}}
         return "auto"
-    if not chat.rounds and (has_target or name == "zoom_to_lv95"):
-        return {"type": "function", "function": {"name": name}}
-    if name not in ("add_layer", "remove_layer") or not re.search(r"\b(?:layer|ebene)\s+(?!(?:auf|von|on|from)\b)\w", imperative):
+    if re.search(r"\b(?:nicht|nie|niemals|not|never|wenn|falls|if|unless)\b", message):
+        return "auto"
+    ordinal = definition["ordinalPattern"]
+    numbered = re.search(ordinal, message)
+    if numbered and not chat.last_results:
+        return "auto"
+    has_target = numbered is not None or re.search(r"\b(?:ch\.[a-z0-9_.:-]+|id\s+[a-z0-9_.:-]+)\b", message)
+    named_layer = not numbered and re.search(r"\b(?:layer|ebene)\s+(?!(?:auf|von|on|from)\b)\w", imperative)
+
+    read_request = re.search(r"\b(?:informationen|information|infos|details|metadaten|metadata|beschreibung|description|legende|legend)\b", message)
+    if read_request:
+        name = "get_layer_details"
+    elif re.search(r"\b(?:liste|trefferliste|ergebnisliste|list|verlauf|history)\b", message):
+        return "auto"
+    elif (re.match(r"^(?:zentrier(?:e)?|zoom(?:e)?|center)\b", imperative) and "lv95" in message
+          and len(re.findall(r"\b[0-9]+", message)) >= 3 and re.search(r"massstab|maßstab|scale|1\s*:", message)):
+        name = "zoom_to_lv95"
+    elif re.match(r"^(?:entferne|remove)\b", imperative):
+        name = "remove_layer"
+    elif (re.match(r"^(?:aktiviere|blende|enable)\b", imperative) or
+          (re.match(r"^(?:zeig(?:e)?|show)\b", imperative) and (
+              re.search(r"\b(?:auf (?:der|meiner|dieser) karte|on (?:the|my) map|an[.!]?$)", imperative) or
+              re.fullmatch(r"(?:zeig(?:e)?|show)(?:\s+mir)?\s+" + ordinal + r"[.!]?", imperative)))):
+        name = "add_layer"
+    else:
+        return "auto"
+
+    if name in prior_calls:
         return "auto"
     if not chat.rounds:
-        return {"type": "function", "function": {"name": "search_layers"}}
-    for step in chat.rounds:
-        for call, result in zip(step.calls, step.results):
-            if call.function.name == "search_layers":
-                outcome = json.loads(result.content)
-                data = outcome.get("data")
-                if outcome["ok"] and isinstance(data, dict) and data.get("layers"):
-                    return {"type": "function", "function": {"name": name}}
+        if has_target or name == "zoom_to_lv95":
+            return {"type": "function", "function": {"name": name}}
+        if named_layer:
+            return {"type": "function", "function": {"name": "search_layers"}}
+    elif named_layer:
+        for outcome in search_outcomes:
+            data = outcome.get("data")
+            if outcome["ok"] and isinstance(data, dict) and data.get("layers"):
+                return {"type": "function", "function": {"name": name}}
     return "auto"
 
 
@@ -260,6 +290,8 @@ async def chat(request: Request):
         calls = [Call.model_validate(call.model_dump(include=fields)) for call in raw_calls or []]
         if tool_choice != "auto" and not calls:
             raise ValueError("required tool call missing")
+        if tool_choice == "required" and any(call.function.name != "search_layers" for call in calls):
+            raise ValueError("unexpected search tool")
         if isinstance(tool_choice, dict) and any(call.function.name != tool_choice["function"]["name"] for call in calls):
             raise ValueError("unexpected tool")
         searches += check_calls(calls, used_ids)

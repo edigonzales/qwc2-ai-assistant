@@ -112,6 +112,14 @@ test('catalog detail HEAD and missing ID keep their real status', async t => {
     assert.equal(absent.status, 404);
 });
 
+test('catalog detail accepts an encoded colon in a valid ID', async t => {
+    const response = await request(t, async url => {
+        assert.equal(url, 'http://127.0.0.1:19083/api/v1/ebenen/wms:layer');
+        return Response.json({id: 'wms:layer'});
+    }, '/catalog-api/v1/ebenen/wms%3Alayer');
+    assert.deepEqual(await response.json(), {id: 'wms:layer'});
+});
+
 test('catalog rejects unsupported and overlong queries before fetching', async t => {
     for (const query of ['?q=a&q=b', '?q=' + 'a'.repeat(161), '?other=x', '?sort=title']) {
         const res = await request(t, () => { throw new Error('must not forward'); }, '/catalog-api/v1/ebenen' + query);

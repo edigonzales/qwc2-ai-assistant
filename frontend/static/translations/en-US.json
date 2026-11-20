@@ -30,7 +30,9 @@
         "toolSupport": "Infomaniak rejected tool calls for this model.",
         "unavailable": "The AI service is currently unavailable."
       },
+      "found": "Found {0} layers.",
       "loading": "Working …",
+      "noResults": "The catalog returned no suitable layers. Try a more specific topic or term.",
       "question": "Ask the map",
       "results": "Matching layers",
       "send": "Send",

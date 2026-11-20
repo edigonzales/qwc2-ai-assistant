@@ -121,6 +121,42 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(second.status_code, 200)
         self.assertEqual(self.requests[0]["tool_choice"]["function"]["name"], "remove_layer")
 
+    def test_read_requests_never_force_map_mutation(self):
+        message = "Zeige mir Details zu Layer Gemeindegrenzen."
+        self.assertEqual(tool_choice_for(Chat(message=message))["function"]["name"], "search_layers")
+        actual = step(call("search_layers", "search", {"query": "Gemeindegrenzen"}))
+        actual["results"][0]["content"] = '{"ok":true,"data":{"layers":[{"id":"ch.so.agi.gemeindegrenzen"}]}}'
+        self.assertEqual(tool_choice_for(Chat(message=message, rounds=[actual]))["function"]["name"], "get_layer_details")
+        matches = [{"id": "visible.one", "title": "Eins"}, {"id": "visible.two", "title": "Zwei"}]
+        for phrase in ["Zeige die Legende zu Nummer 2.", "Zeige die Beschreibung von Ebene 2."]:
+            self.assertEqual(tool_choice_for(Chat(message=phrase, last_results=matches))["function"]["name"],
+                             "get_layer_details")
+        self.assertEqual(tool_choice_for(Chat(message="Zeige Layer 2 auf der Karte.", last_results=matches))["function"]["name"],
+                         "add_layer")
+
+    def test_explicit_search_rejects_an_unverified_text_list_and_requires_presentation(self):
+        message = "Suche Karten zu Wasser und Grundwasser."
+        response = self.send({"message": message},
+                             httpx.Response(200, json=completion("1. Erfunden (ch.so.fake)")))
+        self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+        self.assertEqual(self.requests[0]["tool_choice"], "required")
+        actual = step(call("search_layers", "search", {"query": "Wasser"}))
+        self.assertEqual(tool_choice_for(Chat(message=message, rounds=[actual]))["function"]["name"],
+                         "present_layer_results")
+
+    def test_empty_thematic_search_can_retry_before_presentation(self):
+        message = "Wo ist Strassenverkehrslärm kartiert?"
+        first = step(call("search_layers", "search", {"query": "Strassenverkehrslärm"}))
+        first["results"][0]["content"] = '{"ok":true,"data":{"layers":[]}}'
+        retry = step(call("search_layers", "retry", {"query": "Strassenlärm"}))
+        retry["results"][0]["content"] = first["results"][0]["content"]
+        self.assertEqual(tool_choice_for(Chat(message=message, rounds=[first]))["function"]["name"], "search_layers")
+        self.assertEqual(tool_choice_for(Chat(message=message, rounds=[first, retry]))["function"]["name"],
+                         "present_layer_results")
+        first["results"][0]["content"] = '{"ok":false,"error":"catalogUnavailable"}'
+        self.assertEqual(tool_choice_for(Chat(message=message, rounds=[first]))["function"]["name"],
+                         "present_layer_results")
+
     def test_unknown_tool_and_invalid_arguments_are_rejected(self):
         for request in [call("shell"), call("zoom_to_lv95", arguments={"easting": True, "northing": 1228400, "scale": 10000}),
                         call("get_layer_details", arguments={"id": "../other"})]:

@@ -1,4 +1,4 @@
-import {limits, numberedLayer} from './tools.mjs';
+import {limits, numberedLayer, ordinalPattern} from './tools.mjs';
 
 const idTools = new Set(['add_layer', 'remove_layer', 'get_layer_details']);
 
@@ -7,7 +7,7 @@ export function errorCode(error, fallback = 'chatFailed') {
 }
 
 export async function runConversation({message, history, lastResults, runTool, signal, fetchImpl = fetch}) {
-    const requestedNumbers = [...message.matchAll(/\b(?:nummer|number|nr\.?)\s*(\d+)\b/gi)];
+    const requestedNumbers = [...message.matchAll(new RegExp(ordinalPattern, 'gi'))];
     const selected = requestedNumbers.length === 1 ? numberedLayer(lastResults, Number(requestedNumbers[0][1])) : null;
     if (requestedNumbers.length === 1 && !selected) throw new Error('unknownResult');
     const keepResults = requestedNumbers.length > 0 && !/\b(?:such(?:e|en)?|search|find)\b/i.test(message);
@@ -79,7 +79,6 @@ export async function runConversation({message, history, lastResults, runTool, s
                 const data = await runTool(name, args);
                 signal?.throwIfAborted();
                 if (name === 'search_layers') data.layers.forEach(row => knownIds.add(row.id));
-                if (name === 'get_visible_layers') data.layers.forEach(row => knownIds.add(row.qwcLayerName));
                 content = JSON.stringify({ok: true, data});
                 if (content.length > limits.resultLength) throw new Error('resultTooLarge');
             } catch (error) {

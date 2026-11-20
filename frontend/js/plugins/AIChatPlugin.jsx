@@ -105,13 +105,20 @@ export default function AIChatPlugin() {
             const history = turns.map(({user, assistant}) => ({user, assistant}));
             const result = await runConversation({message, history, lastResults: results, runTool, signal: controller.signal});
             controller.signal.throwIfAborted();
-            const turn = {user: message, assistant: result.assistant, key: ++nextMessage.current};
+            const issue = result.errors[0];
+            let answer = result.assistant;
+            if (issue) {
+                answer = errorLabel(issue);
+            } else if (presented) {
+                answer = presented.length ? LocaleUtils.tr('aichat.found', presented.length) : LocaleUtils.tr('aichat.noResults');
+            }
+            const turn = {user: message, assistant: answer, failed: Boolean(issue), key: ++nextMessage.current};
             setTurns(previous => [...previous, turn].slice(-limits.historyTurns));
             if (presented) {
                 setResults(presented);
                 setDetails(null);
             }
-            setError(result.errors[0] ?? null);
+            setError(issue ?? null);
         } catch (err) {
             if (!controller.signal.aborted) {
                 setError(errorCode(err));
@@ -150,9 +157,10 @@ export default function AIChatPlugin() {
                 <div aria-live="polite" className="aichat-scroll" ref={scroll} role="log">
                     {turns.map(turn => (
                         <React.Fragment key={turn.key}>
-                            <p aria-label={LocaleUtils.tr('aichat.you')} className="aichat-user">{turn.user}</p>
-                            <p aria-label={LocaleUtils.tr('appmenu.items.AIChat')} className="aichat-answer"
-                                ref={!pending && turn === turns.at(-1) ? latest : null}>{turn.assistant}</p>
+                            <p aria-label={LocaleUtils.tr('aichat.you')} className="aichat-user"
+                                ref={!pending && turn.failed && turn === turns.at(-1) ? latest : null}>{turn.user}</p>
+                            {turn.failed ? null : <p aria-label={LocaleUtils.tr('appmenu.items.AIChat')} className="aichat-answer"
+                                ref={!pending && turn === turns.at(-1) ? latest : null}>{turn.assistant}</p>}
                         </React.Fragment>
                     ))}
                     {results.length > 0 ? (

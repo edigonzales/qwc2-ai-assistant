@@ -17,7 +17,7 @@ test('numbered follow-up correlates the exact result and rejects the wrong past 
         reply('Zwei')
     ];
     const result = await runConversation({
-        message: 'Mehr Informationen zu Nummer 2', history: [], lastResults: previous,
+        message: 'Mehr Informationen zu Ebene 2', history: [], lastResults: previous,
         runTool: (name, args) => {
             assert.equal(name, 'get_layer_details');
             assert.equal(args.id, 'layer.two');
@@ -56,6 +56,28 @@ test('a searched ID may be used in the same response batch after its search', as
         }
     });
     assert.deepEqual(executed, [['search_layers', {query: 'Wasser'}], ['add_layer', {id: 'known'}]]);
+});
+
+test('a visible QWC name cannot substitute for a catalog ID', async() => {
+    const steps = [
+        reply(null, call('v', 'get_visible_layers'), call('r', 'remove_layer', {id: 'qwc.alias'})),
+        reply(null, call('s', 'search_layers', {query: 'QWC-Titel'})),
+        reply(null, call('c', 'remove_layer', {id: 'catalog.id'})),
+        reply('Layer entfernt.')
+    ];
+    const executed = [];
+    const turn = await runConversation({
+        message: 'Entferne den sichtbaren Layer', history: [], lastResults: [],
+        fetchImpl: () => steps.shift(),
+        runTool: (name, args) => {
+            if (name === 'get_visible_layers') return {layers: [{qwcLayerName: 'qwc.alias', title: 'QWC-Titel'}]};
+            if (name === 'search_layers') return {layers: [{id: 'catalog.id', title: 'QWC-Titel'}]};
+            executed.push(args.id);
+            return {removed: true};
+        }
+    });
+    assert.deepEqual(executed, ['catalog.id']);
+    assert.deepEqual(turn.errors, ['unknownCandidate']);
 });
 
 test('the browser stops before executing a fourth-round or excess batch', async() => {

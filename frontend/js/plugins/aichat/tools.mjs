@@ -1,6 +1,6 @@
 import definition from '../../../../shared/tools.json' with {type: 'json'};
 
-export const limits = definition.limits;
+export const {limits, ordinalPattern} = definition;
 const schemas = new Map(definition.tools.map(({function: tool}) => [tool.name, tool.parameters]));
 const idSchema = schemas.get('get_layer_details').properties.id;
 const catalogPath = '/catalog-api/v1/ebenen';
