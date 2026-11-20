@@ -1,0 +1,52 @@
+{
+    "name": "QWC2Solothurn",
+    "version": "2026.07.16",
+    "description": "QGIS Web Client 2",
+    "author": "Sourcepole",
+    "license": "BSD-2-Clause",
+    "repository": "git@git.sourcepole.ch:ktso/qwc2-solothurn.git",
+    "private": true,
+    "_workspaces": [
+        "qwc2-lts"
+    ],
+    "dependencies": {
+        "qwc2-lts": "2026.0.30"
+    },
+    "devDependencies": {
+        "@babel/core": "^7.29.6",
+        "@babel/eslint-parser": "^7.28.6",
+        "@babel/plugin-transform-class-properties": "^7.28.6",
+        "@babel/plugin-transform-object-rest-spread": "^7.28.6",
+        "@babel/preset-env": "^7.29.0",
+        "@babel/preset-react": "^7.28.5",
+        "@furkot/webfonts-generator": "^2.0.3",
+        "@microsoft/eslint-formatter-sarif": "^3.1.0",
+        "@types/react": "^19.2.13",
+        "babel-loader": "^10.0.0",
+        "babel-plugin-transform-react-remove-prop-types": "^0.4.24",
+        "clean-webpack-plugin": "^4.0.0",
+        "copy-webpack-plugin": "^13.0.1",
+        "css-loader": "^7.1.3",
+        "eslint": "^9.39.2",
+        "eslint-plugin-perfectionist": "^5.5.0",
+        "eslint-plugin-react": "^7.37.5",
+        "html-webpack-plugin": "^5.6.6",
+        "mkdirp": "^3.0.1",
+        "object-path": "^0.11.8",
+        "react-docgen": "^8.0.2",
+        "source-map-loader": "^5.0.0",
+        "style-loader": "^4.0.0",
+        "typescript": "^5.9.3",
+        "webpack": "^5.105.0",
+        "webpack-bundle-analyzer": "^5.2.0",
+        "webpack-cli": "^6.0.1",
+        "webpack-dev-server": "^5.2.6"
+    },
+    "scripts": {
+        "iconfont": "npx qwc_build_iconfont",
+        "tsupdate": "npx qwc_update_translations",
+        "start:remote": "npm run tsupdate && npm run iconfont && webpack serve --mode development --env REMOTE=1 --host 127.0.0.1",
+        "test:remote": "node --test dev/*.test.cjs server/*.test.cjs",
+        "build:remote": "npm run tsupdate && npm run iconfont && webpack --mode production --env REMOTE=1"
+    }
+}
