@@ -22,6 +22,12 @@ metadata_request = re.compile(
     re.IGNORECASE
 )
 map_mutations = {"add_layer", "remove_layer", "zoom_to_lv95"}
+result_number = re.compile(definition["ordinalPattern"])
+catalog_id = re.compile(r"\b(?:ch\.[a-z0-9_.:-]+|id\s+[a-z0-9_.:-]+)\b")
+layer_name = re.compile(
+    r"\b(?:layer|ebene)(?:\s*:\s*|\s+)(?:[«‹„“‚‘(\"']\w|(?:mit|with)\s+id\s+\w|"
+    r"(?!(?:auf|von|in|im|on|from|an|are|sind|die|der|das|that|which|visibility|sichtbarkeit|zu|zum|zur|über|about|mit|with)\b)\w)"
+)
 system_prompt = """You are the assistant for the Solothurn QWC2 map. Reply in the user's language and use plain text.
 Use the supplied tools to read the actual map or change it only as explicitly requested.
 Never invent map state, catalog entries, IDs, tool execution or success. Use real IDs from
@@ -159,19 +165,9 @@ def messages_for(chat):
     return messages, used_ids, searches
 
 
-def named_layer(message):
-    return re.search(r"\b(?:layer|ebene)(?:\s*:\s*|\s+)[«“\"']?(?!(?:auf|von|in|im|on|from|an|are|sind)\b)\w", message)
-
-
-def catalog_reference(message):
-    return re.search(definition["ordinalPattern"], message) or re.search(
-        r"\b(?:ch\.[a-z0-9_.:-]+|id\s+[a-z0-9_.:-]+)\b", message
-    )
-
-
 def map_command(message):
     if metadata_request.search(message) or re.search(
-        r"\b(?:nicht|nie|niemals|not|never|wenn|falls|if|unless|liste|trefferliste|ergebnisliste|list|verlauf|history|was|what|welche|which)\b",
+        r"\b(?:nicht|nie|niemals|not|never|wenn|falls|if|unless|liste|trefferliste|ergebnisliste|list|verlauf|history)\b",
         message
     ):
         return None
@@ -181,19 +177,20 @@ def map_command(message):
     numbered_command = re.fullmatch(definition["ordinalPattern"] + r"\s+(anzeigen|einblenden|entfernen|show|remove)[.!]?", message)
     if numbered_command:
         return "remove_layer" if numbered_command[2] in {"entfernen", "remove"} else "add_layer"
-    if re.match(r"^(?:entferne|remove)\b", message) and (catalog_reference(message) or re.search(r"\b(?:layer|ebene)\b", message)):
-        return "remove_layer"
-    if (re.match(r"^(?:zeig(?:e)?|show|aktiviere|blende|enable|füge|add)\b", message)
-        and not re.search(r"\b(?:sichtbare[nr]?|visible|eingeblendete[nr]?|geladene[nr]?)\b", message)
-        and (named_layer(message) or catalog_reference(message)
-             or re.search(r"\b(?:auf (?:der|meiner|dieser) karte|on (?:the|my) map)\b", message))):
-        return "add_layer"
+    command = re.match(r"^(zeig(?:e)?|show|aktiviere|blende|enable|füge|add|entferne|remove)\s+"
+                       r"(?:(?:mir|me)\s+)?(?:(?:den|die|das|the)\s+)?", message)
+    if command:
+        target = message[command.end():]
+        if result_number.match(target) or catalog_id.match(target) or layer_name.match(target):
+            return "remove_layer" if command[1] in {"entferne", "remove"} else "add_layer"
     return None
 
 
 def tool_choice_for(chat, message, mutation):
     search_request = (
         re.match(r"^(?:such(?:e)?|find(?:e)?|search)\b(?!\s+(?:nicht|not)\b)", message)
+        or re.match(r"^(?:zeig(?:e)?|show)\s+(?:(?:mir|me)\s+)?(?:(?:die|the)\s+)?"
+                    r"(?:layer|layers|ebenen|karten|maps)\s+(?:zu|zum|zur|über|about)\b", message)
         or (re.match(r"^(?:welche|which)\b", message) and re.search(r"\b(?:karten|maps)\b", message)
             and not re.search(r"\b(?:sichtbar|visible|geladen|eingeblendet)\b", message))
         or re.search(r"\bkartiert\b", message)
@@ -210,15 +207,22 @@ def tool_choice_for(chat, message, mutation):
         if "present_layer_results" not in prior_calls:
             return {"type": "function", "function": {"name": "present_layer_results"}}
         return "auto"
-    numbered = re.search(definition["ordinalPattern"], message)
+    if not mutation and not metadata_request.search(message):
+        if ("get_visible_layers" not in prior_calls and re.search(r"\b(?:layer|layers|ebenen?|karten|maps)\b", message)
+            and re.search(r"\b(?:sichtbar\w*|eingeblendet\w*|geladen\w*|visible|loaded|enabled)\b", message)):
+            return {"type": "function", "function": {"name": "get_visible_layers"}}
+        if ("get_map_state" not in prior_calls and re.search(r"\b(?:karte|map)\b", message)
+            and re.search(r"\b(?:koordinatenreferenzsystem|koordinatensystem|crs|massstab|maßstab|scale|zentriert|centered)\b", message)):
+            return {"type": "function", "function": {"name": "get_map_state"}}
+    numbered = result_number.search(message)
     if numbered and not chat.last_results:
         return "auto"
     name = mutation or ("get_layer_details" if metadata_request.search(message) else None)
     if not name or name in prior_calls:
         return "auto"
-    named = not numbered and named_layer(message)
+    named = not numbered and layer_name.search(message)
     if not chat.rounds:
-        if catalog_reference(message) or name == "zoom_to_lv95":
+        if numbered or catalog_id.search(message) or name == "zoom_to_lv95":
             return {"type": "function", "function": {"name": name}}
         if named:
             return {"type": "function", "function": {"name": "search_layers"}}
@@ -311,8 +315,16 @@ async def chat(request: Request):
             raise ValueError("required tool call missing")
         if tool_choice == "required" and any(call.function.name != "search_layers" for call in calls):
             raise ValueError("unexpected search tool")
-        if isinstance(tool_choice, dict) and any(call.function.name != tool_choice["function"]["name"] for call in calls):
-            raise ValueError("unexpected tool")
+        if isinstance(tool_choice, dict):
+            name = tool_choice["function"]["name"]
+            if any(call.function.name != name for call in calls):
+                raise ValueError("unexpected tool")
+            if not schemas[name]["properties"]:
+                # Infomaniak can add unused fields to a forced argument-free read.
+                for call in calls:
+                    if not isinstance(json.loads(call.function.arguments), dict):
+                        raise ValueError("invalid read tool arguments")
+                    call.function.arguments = "{}"
         searches += check_calls(calls, used_ids)
         if calls and (len(payload.rounds) + 1 >= limits["rounds"] or len(used_ids) > limits["calls"]
                       or searches > limits["searches"]):

@@ -119,11 +119,11 @@ export default function AIChatPlugin() {
             });
             controller.signal.throwIfAborted();
             const issue = result.errors[0];
-            let answer = result.assistant;
-            if (issue) {
-                answer = confirmations.join('\n').slice(0, limits.replyLength) || errorLabel(issue);
-            } else if (presented) {
-                answer = presented.length ? LocaleUtils.tr('aichat.found', presented.length) : LocaleUtils.tr('aichat.noResults');
+            let answer = confirmations.join('\n').slice(0, limits.replyLength);
+            if (!answer) {
+                if (issue) answer = errorLabel(issue);
+                else if (presented) answer = presented.length ? LocaleUtils.tr('aichat.found', presented.length) : LocaleUtils.tr('aichat.noResults');
+                else answer = result.assistant;
             }
             const turn = {user: message, assistant: answer, failed: Boolean(issue && !confirmations.length), key: ++nextMessage.current};
             setTurns(previous => [...previous, turn].slice(-limits.historyTurns));
@@ -131,10 +131,10 @@ export default function AIChatPlugin() {
                 setResults(presented);
                 setDetails(null);
             }
-            setError(issue ?? null);
+            setError(issue ? {code: issue, partial: confirmations.length > 0} : null);
         } catch (err) {
             if (!controller.signal.aborted) {
-                setError(errorCode(err));
+                setError({code: errorCode(err), partial: confirmations.length > 0});
                 if (confirmations.length) {
                     const turn = {user: message, assistant: confirmations.join('\n').slice(0, limits.replyLength), key: ++nextMessage.current};
                     setTurns(previous => [...previous, turn].slice(-limits.historyTurns));
@@ -162,7 +162,7 @@ export default function AIChatPlugin() {
             if (name === 'get_layer_details') setDetails(data);
             else setNotice(data);
         } catch (err) {
-            if (!controller.signal.aborted) setError(errorCode(err, 'toolFailed'));
+            if (!controller.signal.aborted) setError({code: errorCode(err, 'toolFailed')});
         } finally {
             if (active.current === controller) cancel();
         }
@@ -210,7 +210,9 @@ export default function AIChatPlugin() {
                     ) : null}
                     {pending ? <p aria-label={LocaleUtils.tr('aichat.you')} className="aichat-user" ref={latest}>{pending}</p> : null}
                 </div>
-                {error ? <p className="aichat-error" role="alert">{errorLabel(error)}</p> : null}
+                {error ? <p className="aichat-error" role="alert">
+                    {error.partial ? LocaleUtils.tr('aichat.partial', errorLabel(error.code)) : errorLabel(error.code)}
+                </p> : null}
                 <form className="aichat-compose" onSubmit={submit}>
                     {busy ? <div className="aichat-busy" role="status"><Spinner /> {LocaleUtils.tr('aichat.loading')}</div> : null}
                     <InputContainer>

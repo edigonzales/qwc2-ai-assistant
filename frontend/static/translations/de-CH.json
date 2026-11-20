@@ -36,6 +36,7 @@
       "layerShown": "«{0}» ist auf der Karte aktiv ({1} von {2} Unterlayern).",
       "loading": "Wird verarbeitet …",
       "noResults": "Im Katalog war kein passender Layer erkennbar. Versuche es mit einem präziseren Thema oder Fachbegriff.",
+      "partial": "Ein Teilschritt ist fehlgeschlagen. {0}",
       "question": "Frage an die Karte",
       "results": "Gefundene Layer",
       "send": "Senden",

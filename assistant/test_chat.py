@@ -143,13 +143,15 @@ class ChatTests(unittest.TestCase):
 
     def test_read_turns_reject_model_proposed_mutations(self):
         for message in ["Zeige die Legende der Gemeindegrenzen.", "Was ist der Layer ch.so.agi.gemeindegrenzen?",
-                        "Erkläre den Layer Gemeindegrenzen.", "Zeige mir, was der Layer Gemeindegrenzen enthält."]:
+                        "Erkläre den Layer Gemeindegrenzen.", "Zeige mir, was der Layer Gemeindegrenzen enthält.",
+                        "Zeige die Layer die sichtbar sind", "Zeige die Layer auf der Karte",
+                        "Zeige mir ob Layer Gemeindegrenzen sichtbar ist",
+                        "Show me whether the layer ch.so.agi.gemeindegrenzen is visible."]:
             self.requests.clear()
             response = self.send({"message": message}, httpx.Response(200, json=completion(calls=[call(
                 "add_layer", arguments={"id": "ch.so.agi.gemeindegrenzen"}
             )])))
             self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
-            self.assertEqual(self.requests[0]["tool_choice"], "auto")
             names = {tool["function"]["name"] for tool in self.requests[0]["tools"]}
             self.assertIn("get_layer_details", names)
             self.assertTrue(names.isdisjoint({"add_layer", "remove_layer", "zoom_to_lv95"}))
@@ -157,10 +159,31 @@ class ChatTests(unittest.TestCase):
     def test_named_show_without_map_suffix_starts_with_catalog_search(self):
         search = step(call("search_layers", "search", {"query": "Gemeindegrenzen"}))
         search["results"][0]["content"] = '{"ok":true,"data":{"layers":[{"id":"ch.so.agi.gemeindegrenzen"}]}}'
-        for phrase in ["Zeige den Layer Gemeindegrenzen.", "Zeige den Layer «Gemeindegrenzen».", "Zeige den Layer: Gemeindegrenzen."]:
+        for phrase in ["Zeige den Layer Gemeindegrenzen.", "Zeige den Layer «Gemeindegrenzen».",
+                       "Zeige den Layer „Gemeindegrenzen“.", "Zeige den Layer: Gemeindegrenzen."]:
             self.assertEqual(tool_choice_for(Chat(message=phrase))["function"]["name"], "search_layers")
             self.assertEqual(tool_choice_for(Chat(message=phrase, rounds=[search]))["function"]["name"], "add_layer")
-        self.assertEqual(tool_choice_for(Chat(message="Zeige die sichtbaren Layer im Kartenausschnitt.")), "auto")
+        self.assertEqual(tool_choice_for(Chat(message="Zeige die sichtbaren Layer im Kartenausschnitt."))["function"]["name"],
+                         "get_visible_layers")
+        self.assertEqual(tool_choice_for(Chat(message="Zeige Layer zum Thema Wasser.")), "required")
+
+    def test_visible_layer_question_requires_fresh_tool_data(self):
+        message = "Zeige die Layer die sichtbar sind"
+        history = [{"user": "Welche Layer sind sichtbar?", "assistant": "Gemeindegrenzen sind sichtbar."}]
+        answer = self.send({"message": message, "history": history},
+                           httpx.Response(200, json=completion("Gemeindegrenzen sind sichtbar.")))
+        self.assertEqual((answer.status_code, answer.json()), (502, {"detail": "invalidModelResponse"}))
+        self.assertEqual(self.requests[0]["tool_choice"]["function"]["name"], "get_visible_layers")
+
+    def test_forced_argument_free_read_discards_provider_fields(self):
+        message = {"message": "Welche Layer sind sichtbar?"}
+        output = call("get_visible_layers", arguments={"theme": "default"})
+        response = self.send(message, httpx.Response(200, json=completion(calls=[output])))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["assistant"]["tool_calls"], [call("get_visible_layers")])
+        self.requests.clear()
+        response = self.send(message, httpx.Response(200, json=completion(calls=[call("get_visible_layers", arguments=[])])))
+        self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
 
     def test_explicit_add_turn_excludes_other_map_tools(self):
         response = self.send({"message": "Zeige Layer Gemeindegrenzen."}, httpx.Response(200, json=completion(calls=[call(

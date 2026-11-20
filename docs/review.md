@@ -77,3 +77,21 @@ ein Layername in Anführungszeichen liefen mit dem echten Modell. Zum
 Teilerfolg zeigte ein gezielter Test mit vorgegebenen Modellaufrufen einen
 echten Quarkus-404 und eine bestätigte Entfernung in QWC2. Die Suchmessung
 enthält die Ergebnisse des letzten vollständigen Durchlaufs.
+
+Nachprüfung von `13e967c177b7a449dc29065370505a477183976e`: **FAIL** mit
+OpenCode 2.0.28 und `deepseek/deepseek-flash` bei 45 Node- und 20 SDK-Tests.
+Der Reviewer reproduzierte eine mögliche Layeraktivierung bei Fragen
+nach vorhandenen Kartenlayern und bei «Zeige Layer zum Thema Wasser».
+Die Korrektur bindet die Freigabe für eine Kartenaktion an ein konkretes
+Ziel unmittelbar nach dem Befehlsverb. Themensuchen zeigen Katalogtreffer,
+und Layerübersichten verwenden lesende Werkzeuge. Die Namensauflösung
+akzeptiert auch deutsche typografische Anführungszeichen. Die Oberfläche
+bestätigt Kartenänderungen aus den QWC2-Ergebnissen und kennzeichnet
+fehlgeschlagene Teilschritte gesondert.
+Explizite Kartenstatusfragen verlangen frische Daten. Bei erzwungenen
+parameterlosen Leseaufrufen werden überzählige Felder aus der tatsächlichen
+Provider-Antwort verworfen, bevor der Browser die Argumente validiert.
+Lokal bestanden 45 Node- und 22 SDK-Tests, ESLint und der Compose-Build.
+Chromium prüfte den frischen Kartenzustand und die Layerübersicht,
+typografische Anführungszeichen, die Themensuche ohne Kartenänderung,
+den gemischten 404-/Erfolgsfall und den vollständigen Kartenablauf.

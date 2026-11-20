@@ -36,6 +36,7 @@
     "aichat.layerShown",
     "aichat.loading",
     "aichat.noResults",
+    "aichat.partial",
     "aichat.question",
     "aichat.results",
     "aichat.send",

@@ -36,6 +36,7 @@
       "layerShown": "“{0}” is enabled on the map ({1} of {2} sublayers).",
       "loading": "Working …",
       "noResults": "The catalog returned no suitable layers. Try a more specific topic or term.",
+      "partial": "One step failed. {0}",
       "question": "Ask the map",
       "results": "Matching layers",
       "send": "Send",
