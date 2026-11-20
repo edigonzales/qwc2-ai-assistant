@@ -1,0 +1,108 @@
+{
+  "limits": {
+    "rounds": 4,
+    "calls": 8,
+    "searches": 3,
+    "perSearch": 20,
+    "candidates": 40,
+    "historyTurns": 5,
+    "messageLength": 2000,
+    "replyLength": 4000,
+    "resultLength": 16000,
+    "requestBytes": 131072
+  },
+  "ordinalPattern": "\\b(?:nummer\\s*|number\\s*|nr\\.?\\s*|(?:layer|ebene)\\s+)([0-9]+)\\b",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_map_state",
+        "description": "Read the actual QWC map theme, projection, center, scale and extent.",
+        "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_visible_layers",
+        "description": "Read thematic layers enabled in QWC, including parent visibility.",
+        "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "add_layer",
+        "description": "Show a layer or group using a real catalog ID.",
+        "parameters": {
+          "type": "object", "required": ["id"], "additionalProperties": false,
+          "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$"}}
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remove_layer",
+        "description": "Remove the catalog layer or group from the current map.",
+        "parameters": {
+          "type": "object", "required": ["id"], "additionalProperties": false,
+          "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$"}}
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "zoom_to_lv95",
+        "description": "Center the map at Swiss LV95 coordinates in meters and set the map scale denominator.",
+        "parameters": {
+          "type": "object", "required": ["easting", "northing", "scale"], "additionalProperties": false,
+          "properties": {
+            "easting": {"type": "number", "minimum": 2480000, "maximum": 2840000},
+            "northing": {"type": "number", "minimum": 1070000, "maximum": 1300000},
+            "scale": {"type": "number", "minimum": 1, "maximum": 10000000}
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_layers",
+        "description": "Search the Solothurn catalog using a short Lucene search phrase. Returns up to 20 new candidates.",
+        "parameters": {
+          "type": "object", "required": ["query"], "additionalProperties": false,
+          "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "\\S"}}
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_layer_details",
+        "description": "Read detailed catalog metadata for a real catalog ID.",
+        "parameters": {
+          "type": "object", "required": ["id"], "additionalProperties": false,
+          "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$"}}
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "present_layer_results",
+        "description": "Show at most ten IDs returned by searches in this turn, in relevance order. Use an empty list to clear results when none fit.",
+        "parameters": {
+          "type": "object", "required": ["ids"], "additionalProperties": false,
+          "properties": {
+            "ids": {
+              "type": "array", "maxItems": 10,
+              "items": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$"}
+            }
+          }
+        }
+      }
+    }
+  ]
+}

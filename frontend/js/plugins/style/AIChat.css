@@ -1,0 +1,92 @@
+.aichat {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.aichat-scroll {
+    flex: 1;
+    overflow: auto;
+    overflow-wrap: anywhere;
+    padding: 0.75em;
+}
+
+.aichat-user,
+.aichat-answer {
+    white-space: pre-wrap;
+    margin: 0 0 0.65em;
+    padding: 0.65em 0.75em;
+    border-radius: 0.4em;
+}
+
+.aichat-user {
+    margin-left: 1.5em;
+    background: var(--button-bg-color-hover);
+}
+
+.aichat-answer {
+    margin-right: 1em;
+    border: 1px solid var(--border-color);
+}
+
+.aichat-results {
+    margin: 0.75em 0;
+    padding-left: 2em;
+}
+
+.aichat-results li {
+    padding: 0.55em;
+    margin-bottom: 0.5em;
+    border: 1px solid var(--border-color);
+    border-radius: 0.4em;
+}
+
+.aichat-results p {
+    margin: 0.35em 0;
+}
+
+.aichat-theme {
+    margin-top: 0.15em;
+    font-size: 0.92em;
+}
+
+.aichat-buttons {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4em;
+}
+
+.aichat-detail {
+    margin-top: 0.55em;
+    padding-top: 0.45em;
+    border-top: 1px solid var(--border-color);
+}
+
+.aichat-compose {
+    display: grid;
+    gap: 0.45em;
+    border-top: 1px solid var(--border-color);
+    padding: 0.65em;
+}
+
+.aichat-compose textarea {
+    resize: vertical;
+    min-width: 0;
+    font: inherit;
+}
+
+.aichat-busy {
+    display: flex;
+    gap: 0.35em;
+    align-items: center;
+}
+
+.aichat-error {
+    margin: 0;
+    padding: 0.5em 0.75em;
+    color: var(--text-color-link);
+}
