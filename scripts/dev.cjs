@@ -40,9 +40,9 @@ async function checkPort(port) {
     });
     await new Promise(resolve => server.close(resolve));
 }
-function startFrontend(port, origin) {
+function startFrontend(port, catalogOrigin, assistantOrigin) {
     return new Promise((resolve, reject) => {
-        const env = {...process.env, QWC_PORT: String(port), CATALOG_API_ORIGIN: origin};
+        const env = {...process.env, QWC_PORT: String(port), CATALOG_API_ORIGIN: catalogOrigin, ASSISTANT_API_ORIGIN: assistantOrigin};
         for (const key of ['INFOMANIAK_API_TOKEN', 'INFOMANIAK_PRODUCT_ID', 'INFOMANIAK_MODEL']) delete env[key];
         const child = spawn('npm', ['--prefix', 'frontend', 'run', 'start:remote'], {cwd: repoDir, env, stdio: 'inherit', detached: true});
         let interrupted = false;
@@ -73,7 +73,7 @@ async function main() {
     if (!fs.existsSync(path.join(repoDir, 'frontend/node_modules/.bin/webpack'))) {
         throw new Error('Frontend dependencies missing. Run npm run setup first.');
     }
-    const {port} = devConfig(JSON.parse(compose('config', '--no-env-resolution', '--format', 'json')));
+    const {port} = devConfig(JSON.parse(compose('config', '--no-env-resolution', '--format', 'json', 'qwc', 'kartenkatalog')));
     // Only the QWC container belonging to this Compose project is stopped.
     compose('stop', 'qwc');
     await checkPort(port);
@@ -83,12 +83,13 @@ async function main() {
         if (!/^127\.0\.0\.1:\d+$/.test(address)) throw new Error(`Unexpected ${service} binding: ${address}`);
         return 'http://' + address;
     };
-    const origin = serviceOrigin('kartenkatalog');
+    const catalogOrigin = serviceOrigin('kartenkatalog');
+    const assistantOrigin = serviceOrigin('assistant');
     await Promise.all([
-        waitForHealth(origin, '/q/health/ready', 'kartenkatalog'),
-        waitForHealth(serviceOrigin('assistant'), '/healthz', 'assistant')
+        waitForHealth(catalogOrigin, '/q/health/ready', 'kartenkatalog'),
+        waitForHealth(assistantOrigin, '/healthz', 'assistant')
     ]);
     console.log(`\nQWC dev: http://127.0.0.1:${port}/map/\nCtrl+C stops QWC. Stop the backends with docker compose down.`);
-    return startFrontend(port, origin);
+    return startFrontend(port, catalogOrigin, assistantOrigin);
 }
 main().then(code => { process.exitCode = code; }).catch(error => { console.error(`Dev start failed: ${error.message}`); process.exitCode = 1; });

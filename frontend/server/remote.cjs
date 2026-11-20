@@ -1,6 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const {limits} = require('../../shared/tools.json');
 const ORIGIN = 'https://geo.so.ch';
+const chatPath = '/assistant-api/v1/chat';
 const disabled = new Set([
     'NewsPopup', 'Login', 'Logout', 'LoginMySoCh', 'Authentication', 'Autologin', 'LoginUser',
     'Editing', 'CCCInterface', 'Print', 'MapExport', 'LegendPrint', 'LandRegisterExtract',
@@ -43,7 +45,58 @@ function allowed(url, method) {
     }
     return [/^\/api\/wmts\//, /^\/api\/search\/v2\//, /^\/api\/dataproduct\/v1\/weblayers$/, /^\/api\/data\/v1\//, /^\/api\/v1\/(featureinfo|legend)\/somap$/].some(pattern => pattern.test(url.pathname));
 }
-function createRemoteMiddleware({fetchImpl = fetch, timeout = 10000, catalogOrigin = process.env.CATALOG_API_ORIGIN || 'http://127.0.0.1:8084', staticRoot = path.join(__dirname, '../static')} = {}) {
+function chatResponse(res, status, body) {
+    res.writeHead(status, {'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'});
+    res.end(body);
+}
+
+async function proxyChat(req, res, origin, fetchImpl) {
+    const error = (status, detail) => chatResponse(res, status, JSON.stringify({detail}));
+    const host = req.headers.host || '';
+    if (req.url !== chatPath || req.method !== 'POST' || !/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) ||
+        (req.headers.origin !== undefined && req.headers.origin !== 'http://' + host)) {
+        return error(403, 'chatForbidden');
+    }
+    if (req.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+        return error(415, 'jsonRequired');
+    }
+    if (Number(req.headers['content-length']) > limits.requestBytes) return error(413, 'requestTooLarge');
+
+    const chunks = [];
+    let length = 0;
+    const controller = new AbortController();
+    res.once('close', () => controller.abort());
+    try {
+        req.setTimeout(5000, () => req.destroy());
+        for await (const chunk of req.iterator({destroyOnReturn: false})) {
+            length += chunk.length;
+            if (length > limits.requestBytes) {
+                res.setHeader('Connection', 'close');
+                return error(413, 'requestTooLarge');
+            }
+            chunks.push(chunk);
+        }
+        req.setTimeout(0);
+        const upstream = await fetchImpl(origin.replace(/\/$/, '') + '/api/v1/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+            body: Buffer.concat(chunks, length),
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(35000)]),
+            redirect: 'error'
+        });
+        if (!upstream.headers.get('content-type')?.startsWith('application/json')) return error(502, 'assistantUnavailable');
+        chatResponse(res, upstream.status, Buffer.from(await upstream.arrayBuffer()));
+    } catch (err) {
+        if (!controller.signal.aborted) error(err.name === 'TimeoutError' ? 504 : 502, 'assistantUnavailable');
+    }
+}
+
+function createRemoteMiddleware({
+    fetchImpl = fetch, timeout = 10000,
+    catalogOrigin = process.env.CATALOG_API_ORIGIN || 'http://127.0.0.1:8084',
+    assistantOrigin = process.env.ASSISTANT_API_ORIGIN || 'http://127.0.0.1:8083',
+    staticRoot = path.join(__dirname, '../static')
+} = {}) {
     return async (req, res, next) => {
         let rawPath;
         let url;
@@ -56,6 +109,7 @@ function createRemoteMiddleware({fetchImpl = fetch, timeout = 10000, catalogOrig
         } catch {
             res.writeHead(400); return res.end('Ungültiger Pfad');
         }
+        if (rawPath.startsWith('/assistant-api/')) return proxyChat(req, res, assistantOrigin, fetchImpl);
         const catalogRequest = url.pathname.startsWith('/catalog-api/');
         const config = rawPath.toLowerCase() === '/map/config.json';
         const themes = rawPath.toLowerCase() === '/map/themes.json';

@@ -2,6 +2,7 @@ FROM python:3.12.14-slim
 WORKDIR /app
 COPY assistant/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+COPY shared/tools.json /shared/tools.json
 COPY assistant/app.py .
 USER 65534:65534
 EXPOSE 8080

@@ -8,8 +8,8 @@ steht in [frontend/LICENSE](frontend/LICENSE).
 
 Der unveränderte [Quarkus-Kartenkatalog](https://github.com/edigonzales/kartenkatalog)
 lädt den unvollständigen XTF-Entwicklungsstand aus `data/`. Der Kartenclient
-erreicht die API unter `/catalog-api/v1/ebenen`. Der FastAPI-Dienst stellt in
-dieser Phase `/healthz` bereit.
+erreicht die API unter `/catalog-api/v1/ebenen`. Der FastAPI-Dienst vermittelt
+Chat und Function Calling über die OpenAI-kompatible Infomaniak-API.
 
 ## Lokal starten
 
@@ -35,6 +35,11 @@ Die Dienste verwenden Loopback-Ports. Bei Portkonflikten `QWC_PORT`,
 `ASSISTANT_PORT` oder `CATALOG_PORT` in der lokalen `.env` anpassen
 (Standard 8082, 8083 und 8084). Eine Vorlage steht in `.env.example`.
 
+Für den Chat `INFOMANIAK_API_TOKEN`, `INFOMANIAK_PRODUCT_ID` und
+`INFOMANIAK_MODEL` in der gitignorierten `.env` setzen. Compose übergibt
+diese Werte an FastAPI. Das Modell muss auf dem gewählten Produkt
+verfügbar sein und Function Calling unterstützen.
+
 ## Prüfen
 
 ```sh
@@ -42,6 +47,7 @@ npm test
 curl -fsS 'http://127.0.0.1:8082/catalog-api/v1/ebenen?q=wasser&sort=relevance'
 curl -fsS 'http://127.0.0.1:8082/catalog-api/v1/ebenen/ch.so.agi.gemeindegrenzen'
 curl -fsS 'http://127.0.0.1:8083/healthz'
+docker compose exec -T assistant env -u INFOMANIAK_API_TOKEN -u INFOMANIAK_PRODUCT_ID -u INFOMANIAK_MODEL python - < assistant/test_chat.py
 ```
 
 Die öffentliche Live-Anbindung beschränkt sich auf Kartenkonfiguration und

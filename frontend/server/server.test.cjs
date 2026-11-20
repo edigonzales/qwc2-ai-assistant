@@ -16,11 +16,13 @@ async function fixture(t, fetchImpl = async () => { throw new Error('unexpected 
     const server = createServer({staticRoot: root, fetchImpl, catalogOrigin: 'http://catalog:8080'});
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     t.after(async () => { await new Promise(resolve => server.close(resolve)); await fs.rm(dir, {recursive: true}); });
-    return async (route, method = 'GET') => new Promise((resolve, reject) => {
-        const req = http.request({hostname: '127.0.0.1', port: server.address().port, path: route, method}, res => {
+    return async (route, method = 'GET', headers, chunks = []) => new Promise((resolve, reject) => {
+        const req = http.request({hostname: '127.0.0.1', port: server.address().port, path: route, method, headers}, res => {
             let body = ''; res.on('data', chunk => body += chunk); res.on('end', () => resolve({status: res.statusCode, headers: res.headers, body}));
         });
-        req.on('error', reject); req.end();
+        req.on('error', reject);
+        chunks.forEach(chunk => req.write(chunk));
+        req.end();
     });
 }
 test('serves local assets, MIME, HEAD, redirects and real 404s', async t => {
@@ -75,4 +77,18 @@ test('backend connection failures produce 503 health and 502 catalog without fal
     const request = await fixture(t);
     assert.equal((await request('/healthz')).status, 503);
     assert.equal((await request('/catalog-api/v1/ebenen')).status, 502);
+});
+
+test('production accepts the exact chat POST and bounds chunked bodies', async t => {
+    const request = await fixture(t, async (target, options) => {
+        assert.equal(target, 'http://127.0.0.1:8083/api/v1/chat');
+        assert.equal(options.body.toString(), '{"message":"Hallo"}');
+        return Response.json({assistant: {role: 'assistant', content: 'Hallo'}});
+    });
+    const headers = {'Content-Type': 'application/json'};
+    const response = await request('/assistant-api/v1/chat', 'POST', headers, ['{"message":', '"Hallo"}']);
+    assert.equal(response.status, 200);
+    assert.equal(JSON.parse(response.body).assistant.content, 'Hallo');
+    assert.equal((await request('/assistant-api/v1/chat', 'POST', headers, [' '.repeat(70000), ' '.repeat(70000)])).status, 413);
+    assert.equal((await request('/assistant-api/v1/%63hat', 'POST', headers, ['{}'])).status, 403);
 });

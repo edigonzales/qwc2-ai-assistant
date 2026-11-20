@@ -118,3 +118,41 @@ test('catalog rejects unsupported and overlong queries before fetching', async t
         assert.equal(res.status, 400);
     }
 });
+
+test('only the exact chat POST reaches FastAPI, with JSON and without credentials', async t => {
+    const body = JSON.stringify({message: 'Hello'});
+    const response = await request(t, async (target, options) => {
+        assert.equal(target, 'http://127.0.0.1:8083/api/v1/chat');
+        assert.equal(options.method, 'POST');
+        assert.equal(options.body.toString(), body);
+        assert.deepEqual(options.headers, {'Content-Type': 'application/json', Accept: 'application/json'});
+        return Response.json({detail: 'providerRateLimit'}, {status: 429});
+    }, '/assistant-api/v1/chat', {
+        method: 'POST', body, headers: {'Content-Type': 'application/json', Authorization: 'Bearer fake', Cookie: 'fake'}
+    });
+    assert.equal(response.status, 429);
+    assert.deepEqual(await response.json(), {detail: 'providerRateLimit'});
+});
+
+test('chat rejects another origin, method, URL, or media type before any upstream', async t => {
+    const path = '/assistant-api/v1/chat';
+    const json = {'Content-Type': 'application/json'};
+    for (const [route, options, status] of [
+        [path, {}, 403],
+        [path, {method: 'POST', headers: {...json, Origin: 'https://elsewhere.test'}}, 403],
+        [path + '?extra=1', {method: 'POST', headers: json}, 403],
+        ['/assistant-api/v1/other', {method: 'POST', headers: json}, 403],
+        [path, {method: 'POST', headers: {'Content-Type': 'text/plain'}, body: '{}'}, 415],
+        [path, {method: 'POST', headers: json, body: ' '.repeat(131073)}, 413]
+    ]) {
+        const response = await request(t, () => assert.fail('should not forward'), route, options);
+        assert.equal(response.status, status);
+    }
+});
+
+test('unavailable Python service has a stable response and no upstream detail', async t => {
+    const response = await request(t, async () => { throw new Error('private upstream information'); },
+        '/assistant-api/v1/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), {detail: 'assistantUnavailable'});
+});

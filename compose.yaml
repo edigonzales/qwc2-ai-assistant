@@ -24,6 +24,10 @@ services:
     build:
       context: .
       dockerfile: assistant/Dockerfile
+    environment:
+      INFOMANIAK_API_TOKEN: ${INFOMANIAK_API_TOKEN:-}
+      INFOMANIAK_PRODUCT_ID: ${INFOMANIAK_PRODUCT_ID:-}
+      INFOMANIAK_MODEL: ${INFOMANIAK_MODEL:-}
     ports:
       - "127.0.0.1:${ASSISTANT_PORT:-8083}:8080"
     read_only: true
@@ -33,6 +37,7 @@ services:
     build: .
     environment:
       CATALOG_API_ORIGIN: http://kartenkatalog:8080
+      ASSISTANT_API_ORIGIN: http://assistant:8080
     depends_on:
       - kartenkatalog
     ports:

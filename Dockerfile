@@ -16,6 +16,7 @@ ENV NODE_ENV=production PORT=8080 CATALOG_API_ORIGIN=http://kartenkatalog:8080
 WORKDIR /app
 COPY --from=build --chown=node:node /build/prod/ ./prod/
 COPY --chown=node:node frontend/server/server.cjs frontend/server/remote.cjs ./server/
+COPY shared/tools.json /shared/tools.json
 COPY LICENSE ./LICENSE
 COPY frontend/LICENSE ./LICENSE.qwc
 USER node
