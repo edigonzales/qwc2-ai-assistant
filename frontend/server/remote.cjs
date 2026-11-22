@@ -30,7 +30,7 @@ function adaptConfig(input) {
     }
     for (const device of ['desktop', 'mobile']) {
         const plugins = config.plugins[device] ||= [];
-        plugins.push({name: 'AIChat'});
+        plugins.push({name: 'AIChat', mapClickAction: 'identify'});
         const topbar = plugins.find(plugin => plugin.name === 'TopBar');
         if (topbar) {
             topbar.cfg ||= {};
