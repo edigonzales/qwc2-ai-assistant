@@ -61,3 +61,23 @@ Adresse mit «in» und unterschied einen leeren Treffer von einem nicht
 verfügbaren Datensatz. Ein GetFeatureInfo-Aufruf für die Fassade
 «Grundnutzung» lieferte weiterhin die Antworten der beiden Kinder.
 [Suchmessung](search-quality.md)
+
+## Browser-Debug und FastAPI-Logs
+
+Basis `d45e55af9a36b9ac9f65317e0739a75f14c4b7b2`, geprüft
+`5ef626aee460d16d063c13d8914bfb5a68ee3592`. **PASS** mit OpenCode 2.0.28
+und `deepseek/deepseek-flash`. Der unabhängige Review führte 40 Node- und
+28 Python-Tests aus. Er prüfte die getrennten Freigaben für Browser- und
+stdout-Inhalte, die Schwärzung des konfigurierten Tokens, die Proxy-Header
+und die unveränderten Standardantworten. Das README beschreibt die Grenzen
+der Schwärzung und gekürzte Vorschauen ausdrücklich.
+
+Lokal bestanden die Tests und das gezielte ESLint. Chromium prüfte die
+Wassersuche mit echtem Infomaniak und Solothurner Suche, die gemeinsame
+Kennung über drei Modellrunden und das Anzeigen einer Layergruppe. Ohne
+Textoption standen nur Metadaten auf stdout, obwohl die Modellnachrichten
+im Browser sichtbar waren. Mit Textoption erschienen Chat- und
+Geo-Vorschauen auf stdout. Ein von Infomaniak abgelehnter Modellaufruf
+lieferte im Browser und in den Logs denselben Fehlercode und dieselbe
+Kennung. Beide Mermaid-Diagramme wurden mit draw.io gerendert, und die
+relativen README-Links wurden geprüft.

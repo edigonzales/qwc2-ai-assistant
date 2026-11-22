@@ -181,13 +181,16 @@ Aktiviere in der Konsole die Debug- oder Verbose-Ausgabe und filtere nach
 `chat.backend` den Modellaufruf und `tool.result` sowie `chat.display` die
 Ausführung und Anzeige.
 Bei `content` enthält `chat.backend` die gesendeten Modellnachrichten und die
-sichtbare Modellantwort als JSON-Vorschau. Für Metadaten verwende `meta`.
+sichtbare Modellantwort als Vorschau unter `payload.json`. Bei
+`payload.truncated: true` enthält das Feld nur den Anfang des JSON-Texts.
+Für Metadaten verwende `meta`.
 Mit `sessionStorage.removeItem('qwc-ai-debug')` schaltest du die Ausgabe aus.
 
 FastAPI schreibt pro Chat- und Geo-Aufruf eine JSON-Zeile auf `stdout`.
 Mit `ASSISTANT_DEBUG=1` enthält sie zusätzlich Provider- oder Geo-Diagnosen.
-`turn_id` und `round` verbinden den Eintrag mit der Browserkonsole. Scheitert
-der Aufruf schon im Browser oder Proxy, gibt es dazu keinen FastAPI-Eintrag.
+`turn_id` und `round` verbinden den Eintrag mit der Browserkonsole. Direkte
+Trefferaktionen erhalten eine eigene `turn_id`. Scheitert der Aufruf schon
+im Browser oder Proxy, gibt es dazu keinen FastAPI-Eintrag.
 
 ```sh
 docker compose logs --no-log-prefix --no-color -f assistant
@@ -195,8 +198,9 @@ docker compose logs --no-log-prefix --no-color -f assistant
 
 `ASSISTANT_DEBUG_PAYLOAD=1` ergänzt bei aktivem Server-Debug auch auf `stdout`
 eine begrenzte Textvorschau. Dafür ist keine aktivierte Browserkonsole nötig.
-Zugangsdaten und HTTP-Header werden nicht ausgegeben. Fragen, Verlauf und
-Adressen können in der Vorschau stehen. Docker kann diese Inhalte speichern.
+FastAPI schwärzt den konfigurierten Infomaniak-Token und lässt HTTP-Header
+weg. Die Vorschau kann Fragen, Verlauf, Adressen und im Chat eingegebene
+Zugangsdaten enthalten. Docker kann diese Inhalte speichern.
 Setze beide Variablen auf `0` und führe `docker compose up -d assistant` aus,
 um die zusätzlichen Server-Diagnosen abzuschalten.
 
