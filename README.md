@@ -16,9 +16,13 @@ Browser und wird beim Neuladen verworfen.
 ## Lokal starten
 
 Voraussetzungen sind Docker Compose, Internetzugang und für den Host-Modus
-Node 22.13 oder neuer.
+Node.js 22.13 oder neuer. Die verwendete Node-Version steht in [.nvmrc](.nvmrc).
+
+Führe die Befehle im Repository-Verzeichnis aus. Der erste Befehl legt bei
+einem frischen Checkout die lokale `.env` aus der Vorlage an.
 
 ```sh
+test -e .env || cp .env.example .env
 npm run setup
 npm run dev
 ```
@@ -35,9 +39,11 @@ Container dieses Projekts.
 
 Die Dienste verwenden Loopback-Ports. Bei Portkonflikten `QWC_PORT`,
 `ASSISTANT_PORT` oder `CATALOG_PORT` in der lokalen `.env` anpassen
-(Standard 8082, 8083 und 8084). Eine Vorlage steht in `.env.example`.
+(Standard 8082, 8083 und 8084). Verwende dann auch in der Karten-URL und
+bei den Prüfbefehlen die angepassten Ports.
 
-Für den Chat `INFOMANIAK_API_TOKEN`, `INFOMANIAK_PRODUCT_ID` und
+Karte, Katalog und Tests funktionieren mit leeren Infomaniak-Werten. Für
+den Live-Chat `INFOMANIAK_API_TOKEN`, `INFOMANIAK_PRODUCT_ID` und
 `INFOMANIAK_MODEL` in der gitignorierten `.env` setzen. Compose übergibt
 diese Werte an FastAPI. Das Modell muss auf dem gewählten Produkt
 verfügbar sein und Function Calling unterstützen.
@@ -70,6 +76,13 @@ zulässig. Das Modell sortiert bis zu 40 eindeutige Kandidaten und kann bis zu
 zehn davon anzeigen. Der Browser prüft die IDs gegen die aktuellen Treffer.
 [Suchmessung mit zehn Fachfragen](docs/search-quality.md)
 
+## Einstiegspunkte im Code
+
+- Die Chat-Seitenleiste rendert Nachrichten, Treffer und Direktaktionen. [AIChatPlugin.jsx](frontend/js/plugins/AIChatPlugin.jsx)
+- Browser und FastAPI lesen die Tool-Schemas und Grenzen aus derselben Datei. [tools.json](shared/tools.json)
+- Host- und Containerbetrieb nutzen dieselben Proxy-Routen für Live-Karte, Katalog und Chat. [remote.cjs](frontend/server/remote.cjs)
+- FastAPI validiert Chatnachrichten und vermittelt Modellaufrufe an Infomaniak. [app.py](assistant/app.py)
+
 ## Prüfen
 
 ```sh
@@ -80,12 +93,26 @@ curl -fsS 'http://127.0.0.1:8083/healthz'
 docker compose exec -T assistant env -u INFOMANIAK_API_TOKEN -u INFOMANIAK_PRODUCT_ID -u INFOMANIAK_MODEL python - < assistant/test_chat.py
 ```
 
+### Browser-Check mit Live-Chat
+
+1. Öffne die Karte mit konfiguriertem Infomaniak-Zugang und wähle
+   **Karte & Werkzeuge → KI-Assistent**.
+2. Sende «Suche Karten zu Wasser und Grundwasser im Kanton Solothurn.»
+   Der Chat zeigt eine nummerierte Liste mit bis zu zehn Katalogtreffern.
+3. Klicke bei einem noch nicht sichtbaren Treffer auf **Details**. Unter
+   dem Treffer erscheint die Katalog-ID. Klicke dort auf **Anzeigen**.
+   Unter **Kartenebenen und Legende** erscheint der Layer als aktiv.
+   Bei Gruppen können dort die aktiven Unterlayer erscheinen.
+4. Öffne den KI-Assistenten erneut und sende «Entferne Nummer 2», wobei
+   du die Nummer des angezeigten Treffers verwendest. Der Chat bestätigt
+   die Entfernung und der Layer verschwindet aus Karte und Ebenenbaum.
+
+## Grenzen
+
 Die öffentliche Live-Anbindung beschränkt sich auf Kartenkonfiguration und
 Themes, Kartenbilder und WMTS, Suche, Layerdefinitionen, Feature-Information
-und Legenden. Die zugelassenen Routen stehen im gemeinsamen
-[Proxy](frontend/server/remote.cjs). Für öffentlichen Betrieb wären
-Authentifizierung, Missbrauchs- und Kostenlimits sowie Berechtigungsprüfungen
-erforderlich.
+und Legenden. Für öffentlichen Betrieb wären Authentifizierung, Missbrauchs-
+und Kostenlimits sowie Berechtigungsprüfungen erforderlich.
 
 Der Entwicklungs-Harvest ist unvollständig. Die Treffer hängen von den
 vorhandenen Metadaten und den Suchbegriffen ab. Einzelne Layerdefinitionen
