@@ -1,9 +1,8 @@
 import definition from '../../../../shared/tools.json' with {type: 'json'};
 
-export const {limits, ordinalPattern} = definition;
+export const {limits, locationOrdinalPrefix, ordinalPattern} = definition;
 const schemas = new Map(definition.tools.map(({function: tool}) => [tool.name, tool.parameters]));
 const idSchema = schemas.get('get_layer_details').properties.id;
-const catalogPath = '/catalog-api/v1/ebenen';
 
 function valid(value, schema) {
     switch (schema.type) {
@@ -25,11 +24,10 @@ function valid(value, schema) {
 
 const text = (value, length) => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, length) : '';
 
-function catalogLayer(row, descriptionLength) {
-    if (!valid(row?.id, idSchema) || !valid(row.qwcLayerName, idSchema) || !text(row.title, 120)) return null;
+function layerSummary(row, descriptionLength) {
+    if (!valid(row?.id, idSchema) || !text(row.title, 120)) return null;
     return {
         id: row.id,
-        qwcLayerName: row.qwcLayerName,
         title: text(row.title, 120),
         themeTitle: text(row.themeTitle, 100),
         description: text(row.description, descriptionLength)
@@ -45,55 +43,49 @@ export function createTurnTools({map, fetchImpl = fetch, signal, onResults = () 
     let calls = 0;
     let searches = 0;
 
-    async function catalog(suffix) {
-        const timeout = AbortSignal.timeout(12000);
+    async function readGeo(name, args) {
+        const timeout = AbortSignal.timeout(17000);
         let response;
+        let data;
         try {
-            response = await fetchImpl(catalogPath + suffix, {
-                headers: {Accept: 'application/json'},
+            response = await fetchImpl('/assistant-api/v1/geo', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name, args}),
                 redirect: 'error',
                 signal: signal ? AbortSignal.any([signal, timeout]) : timeout
             });
-        } catch {
-            signal?.throwIfAborted();
-            throw new Error('catalogUnavailable');
-        }
-        if (response.status === 404) throw new Error('layerUnknown');
-        if (!response.ok) throw new Error('catalogUnavailable');
-        let data;
-        try {
             data = await response.json();
         } catch {
             signal?.throwIfAborted();
-            if (timeout.aborted) throw new Error('catalogUnavailable');
-            throw new Error('invalidCatalog');
+            throw new Error(response && !timeout.aborted ? 'invalidGeoResponse' : 'geoUnavailable');
         }
         signal?.throwIfAborted();
+        if (!response.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : 'geoUnavailable');
         return data;
     }
 
     async function search(query) {
         if (++searches > limits.searches) throw new Error('searchLimit');
-        const rows = await catalog('?' + new URLSearchParams({q: query.trim(), sort: 'relevance'}));
+        const {layers: rows} = await readGeo('search_layers', {query: query.trim()}) ?? {};
         if (!Array.isArray(rows)) throw new Error('invalidCatalog');
         const found = [];
         for (const row of rows.slice(0, limits.perSearch)) {
             if (candidates.size >= limits.candidates) break;
-            const layer = catalogLayer(row, 180);
+            const layer = layerSummary(row, 180);
             if (layer && !candidates.has(layer.id)) {
                 candidates.set(layer.id, layer);
-                const {id, title, themeTitle, description} = layer;
-                found.push({id, title, themeTitle, description});
+                found.push(layer);
             }
         }
         return {layers: found};
     }
 
     async function details(id) {
-        const row = await catalog('/' + encodeURIComponent(id));
-        const layer = catalogLayer(row, 1800);
-        if (layer?.id !== id) throw new Error('invalidCatalog');
-        return {...layer, type: text(row.type, 40), organization: text(row.organization, 150)};
+        const row = await readGeo('get_layer_details', {id});
+        const layer = layerSummary(row, 1800);
+        if (layer?.id !== id || !valid(row.qwcLayerName, idSchema)) throw new Error('invalidCatalog');
+        return {...layer, qwcLayerName: row.qwcLayerName, type: text(row.type, 40)};
     }
 
     function present(ids) {
@@ -116,6 +108,8 @@ export function createTurnTools({map, fetchImpl = fetch, signal, onResults = () 
         case 'zoom_to_lv95': return map.zoom(args);
         case 'search_layers': return search(args.query);
         case 'get_layer_details': return details(args.id);
+        case 'resolve_location':
+        case 'query_features': return readGeo(name, args);
         case 'present_layer_results': return present(args.ids);
         default: throw new Error('invalidTool');
         }

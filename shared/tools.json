@@ -12,6 +12,7 @@
     "requestBytes": 131072
   },
   "ordinalPattern": "\\b(?:nummer\\s*|number\\s*|nr\\.?\\s*|(?:layer|ebene)\\s+)([0-9]+)\\b",
+  "locationOrdinalPrefix": "\\b(?:grundstück|grundstueck|grundbuch|gb|parzelle|adresse|haus|parcel|plot|property|address|house)\\s*:?\\s*$",
   "tools": [
     {
       "type": "function",
@@ -33,7 +34,7 @@
       "type": "function",
       "function": {
         "name": "add_layer",
-        "description": "Show a layer or group using a real catalog ID.",
+        "description": "Show a layer or group using a real map layer ID from the Solothurn search.",
         "parameters": {
           "type": "object", "required": ["id"], "additionalProperties": false,
           "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$"}}
@@ -44,7 +45,7 @@
       "type": "function",
       "function": {
         "name": "remove_layer",
-        "description": "Remove the catalog layer or group from the current map.",
+        "description": "Remove a layer or group from the current map using its real map layer ID.",
         "parameters": {
           "type": "object", "required": ["id"], "additionalProperties": false,
           "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$"}}
@@ -70,7 +71,7 @@
       "type": "function",
       "function": {
         "name": "search_layers",
-        "description": "Search the Solothurn catalog using a short Lucene search phrase. Returns up to 20 new candidates.",
+        "description": "Find maps and layers in the Solothurn Web GIS. Send a short thematic term, such as Gewässerschutzbereiche, without the question or location. Returns real map IDs and titles.",
         "parameters": {
           "type": "object", "required": ["query"], "additionalProperties": false,
           "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "\\S"}}
@@ -81,10 +82,36 @@
       "type": "function",
       "function": {
         "name": "get_layer_details",
-        "description": "Read detailed catalog metadata for a real catalog ID.",
+        "description": "Read Web GIS display metadata for a real map layer ID. Display metadata does not establish Data Service availability.",
         "parameters": {
           "type": "object", "required": ["id"], "additionalProperties": false,
           "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$"}}
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "resolve_location",
+        "description": "Resolve a Solothurn street address to an official LV95 point. Provide street, house number and locality when known, for example Klosterplatz 1, Solothurn. Ask the user to clarify ambiguous results.",
+        "parameters": {
+          "type": "object", "required": ["address"], "additionalProperties": false,
+          "properties": {"address": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "\\S"}}
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "query_features",
+        "description": "Query features intersecting an LV95 point in a specific Solothurn Data Service dataset. Use an actual individual layer ID returned by search or given explicitly. An ID is confirmed only by the Data Service response. A successful empty result means no matches at the point.",
+        "parameters": {
+          "type": "object", "required": ["dataset_id", "easting", "northing"], "additionalProperties": false,
+          "properties": {
+            "dataset_id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$"},
+            "easting": {"type": "number", "minimum": 2480000, "maximum": 2840000},
+            "northing": {"type": "number", "minimum": 1070000, "maximum": 1300000}
+          }
         }
       }
     },

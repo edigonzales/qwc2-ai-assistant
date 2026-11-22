@@ -5,7 +5,7 @@ description: Remove unnecessary complexity from a design or implemented change b
 
 Identify the required behavior, actual users, and trust boundaries. Compare the
 change with the smallest direct implementation using current QWC2 actions,
-Quarkus catalog APIs and standard Python/JavaScript facilities.
+Solothurn services and standard Python/JavaScript facilities.
 
 Look for duplicated catalogs or state, speculative providers, extra abstractions,
 trivial wrappers, custom orchestration, redundant validation, complex caching,

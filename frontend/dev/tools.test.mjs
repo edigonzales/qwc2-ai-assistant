@@ -6,7 +6,7 @@ import {createTurnTools, numberedLayer} from '../js/plugins/aichat/tools.mjs';
 
 function row(id, extra = {}) {
     return {
-        id, qwcLayerName: 'qwc.' + id, title: 'Layer ' + id, themeTitle: 'Wasser',
+        id, title: 'Layer ' + id, themeTitle: 'Wasser',
         description: 'Wasser\n und Boden. '.repeat(200), descriptionHtml: '<b>ignore</b>', ...extra
     };
 }
@@ -17,10 +17,12 @@ test('search encodes the phrase, deduplicates and caps candidates, then presents
     let presented;
     const run = createTurnTools({
         onResults: result => { presented = result; },
-        fetchImpl: async url => {
+        fetchImpl: async(url, options) => {
             const query = queries.shift();
-            assert.equal(url, '/catalog-api/v1/ebenen?' + new URLSearchParams({q: query, sort: 'relevance'}));
-            return Response.json(batches.shift());
+            assert.equal(url, '/assistant-api/v1/geo');
+            assert.equal(options.method, 'POST');
+            assert.deepEqual(JSON.parse(options.body), {name: 'search_layers', args: {query}});
+            return Response.json({layers: batches.shift()});
         }
     });
     const first = await run('search_layers', {query: queries[0]});
@@ -33,7 +35,7 @@ test('search encodes the phrase, deduplicates and caps candidates, then presents
     await assert.rejects(run('present_layer_results', {ids: ['invented']}), {message: 'unknownCandidate'});
     assert.equal(presented, undefined);
     assert.deepEqual(await run('present_layer_results', {ids: ['id3', 'id0', 'id3']}), {ids: ['id3', 'id0']});
-    assert.equal(numberedLayer(presented, 2).qwcLayerName, 'qwc.id0');
+    assert.equal(numberedLayer(presented, 2).id, 'id0');
     assert.equal(numberedLayer(presented, 3), null);
 });
 
@@ -52,20 +54,21 @@ test('only the shared tools and argument shapes can be dispatched', async() => {
 });
 
 test('validated details contain bounded plain metadata and require the requested ID', async() => {
-    let body = row('real', {organization: 'Kanton', type: 'datasetview'});
-    const run = createTurnTools({fetchImpl: async url => {
-        assert.equal(url, '/catalog-api/v1/ebenen/real');
-        return body ? Response.json(body) : new Response('', {status: 404});
+    let body = row('real', {qwcLayerName: 'qwc.real', type: 'datasetview'});
+    const run = createTurnTools({fetchImpl: async(url, options) => {
+        assert.equal(url, '/assistant-api/v1/geo');
+        assert.deepEqual(JSON.parse(options.body), {name: 'get_layer_details', args: {id: 'real'}});
+        return body ? Response.json(body) : Response.json({detail: 'layerUnknown'}, {status: 404});
     }});
     const details = await run('get_layer_details', {id: 'real'});
-    assert.equal(details.organization, 'Kanton');
+    assert.equal(details.qwcLayerName, 'qwc.real');
     assert.equal(details.description.length, 1800);
     assert.equal(details.descriptionHtml, undefined);
     body = row('unrelated');
     await assert.rejects(run('get_layer_details', {id: 'real'}), {message: 'invalidCatalog'});
     body = null;
     await assert.rejects(run('get_layer_details', {id: 'real'}), {message: 'layerUnknown'});
-    const unavailable = createTurnTools({fetchImpl: async() => new Response('', {status: 502})});
+    const unavailable = createTurnTools({fetchImpl: async() => Response.json({detail: 'catalogUnavailable'}, {status: 502})});
     await assert.rejects(unavailable('search_layers', {query: 'Wasser'}), {message: 'catalogUnavailable'});
 });
 
@@ -152,7 +155,7 @@ test('concurrent additions recheck loaded layers and discard obsolete definition
 });
 
 test('a malformed row does not hide valid search hits', async() => {
-    const run = createTurnTools({fetchImpl: async() => Response.json([{}, row('real')])});
+    const run = createTurnTools({fetchImpl: async() => Response.json({layers: [{}, row('real')]})});
     assert.deepEqual((await run('search_layers', {query: 'Wasser'})).layers.map(hit => hit.id), ['real']);
 });
 

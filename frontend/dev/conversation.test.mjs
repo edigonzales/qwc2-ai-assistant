@@ -41,6 +41,18 @@ test('numbered follow-up correlates the exact result and rejects the wrong past 
     await assert.rejects(runConversation({message: 'Zeig Nummer 3', history: [], lastResults: previous}), {message: 'unknownResult'});
 });
 
+test('a parcel number reaches the chat with an existing layer result list', async() => {
+    const message = 'Gehe zum Grundstück Nr. 101 in Solothurn';
+    const result = await runConversation({
+        message, history: [], lastResults: previous,
+        fetchImpl: (_url, options) => {
+            assert.equal(JSON.parse(options.body).message, message);
+            return reply('Welche Adresse gehört zum Grundstück?');
+        }
+    });
+    assert.equal(result.assistant, 'Welche Adresse gehört zum Grundstück?');
+});
+
 test('a searched ID may be used in the same response batch after its search', async() => {
     const executed = [];
     const steps = [
@@ -90,7 +102,7 @@ test('a visible QWC name cannot substitute for a catalog ID', async() => {
     assert.deepEqual(turn.errors, ['unknownCandidate']);
 });
 
-test('a catalog 404 remains visible alongside a verified removal in the same batch', async() => {
+test('a layer details 404 remains visible alongside a verified removal in the same batch', async() => {
     const steps = [
         reply(null, call('a', 'remove_layer', {id: 'catalog.missing'}), call('b', 'remove_layer', {id: 'catalog.known'})),
         reply('Beide Layer entfernt.')
@@ -98,7 +110,8 @@ test('a catalog 404 remains visible alongside a verified removal in the same bat
     const confirmations = [];
     const runTool = createTurnTools({
         map: {removeLayer: row => ({id: row.id, title: row.title, removed: true})},
-        fetchImpl: url => url.endsWith('/catalog.missing') ? new Response(null, {status: 404}) :
+        fetchImpl: (_url, options) => JSON.parse(options.body).args.id === 'catalog.missing' ?
+            Response.json({detail: 'layerUnknown'}, {status: 404}) :
             Response.json({id: 'catalog.known', qwcLayerName: 'known', title: 'Bekannter Layer'})
     });
     const turn = await runConversation({

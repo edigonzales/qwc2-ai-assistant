@@ -1,11 +1,14 @@
 import asyncio
+import html
 import json
 import math
 import os
 import re
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
+import httpx2 as httpx
 from fastapi import FastAPI, HTTPException, Request
 from openai import APIError, APIStatusError, APITimeoutError, AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field
@@ -23,35 +26,49 @@ metadata_request = re.compile(
 )
 map_mutations = {"add_layer", "remove_layer", "zoom_to_lv95"}
 result_number = re.compile(definition["ordinalPattern"])
+location_ordinal_prefix = re.compile(definition["locationOrdinalPrefix"], re.IGNORECASE)
 catalog_id = re.compile(r"\b(?:ch\.[a-z0-9_.:-]+|id\s+[a-z0-9_.:-]+)\b")
 layer_name = re.compile(
     r"\b(?:layer|ebene)(?:\s*:\s*|\s+)(?:[«‹„“‚‘(\"']\w|(?:mit|with)\s+id\s+\w|"
     r"(?!(?:auf|von|in|im|on|from|an|are|sind|die|der|das|that|which|visibility|sichtbarkeit|zu|zum|zur|über|about|mit|with)\b)\w)"
 )
 layer_relative_name = re.compile(r"\b(?:layer|ebene)\s*,\s*(?:der|die)\s+\S.*\s+(?:heisst|heißt)[.!?]?$")
+map_words = re.compile(r"\b(?:karten?|maps?|layer|layers|ebenen?)\b")
+street_address = re.compile(
+    r"\b(?:am|an der|beim|liegt|at)\s+(?!grundst(?:ü|ue)ck\b|parzelle\b)"
+    r"(?:[^\W\d_][\w.'’/-]*\s+){1,6}\d{1,3}[a-z]?\b"
+)
 system_prompt = """You are the assistant for the Solothurn QWC2 map. Reply in the user's language and use plain text.
 Use the supplied tools to read the actual map or change it only as explicitly requested.
-Never invent map state, catalog entries, IDs, tool execution or success. Use real IDs from
-catalog results, the numbered result list, or an exact ID supplied by the user and verified
-against the catalog. Report tool errors and partial results honestly.
+Never invent map state, map entries, dataset IDs, tool execution or success. Use real map IDs
+from search, the numbered result list, or an explicit user ID verified by a tool.
+Report tool errors and partial results honestly.
 For every new request about the current map, get fresh tool evidence. Earlier chat replies
 describe past state. For a show request, call add_layer even if that layer was shown earlier.
 Use exactly {} for get_map_state and get_visible_layers. They have no arguments.
-A visible layer name is a QWC name, which can differ from its catalog ID. Use
-search_layers to find a catalog ID when you only know the QWC name or title.
+A group can be shown as a map layer. A facade appears as one layer. Neither is a Data Service
+dataset. Use get_layer_details for the map description. Drawing a layer and querying its data
+are independent.
 
-For a thematic search, usually one or two short, targeted German search phrases suffice.
-Make synonym searches together in the first tool batch. If all first searches found no
-candidates and the server requires a retry, use a shorter phrase with a different synonym.
-The hard maximum is three search_layers calls, and a fourth makes the request fail. Lucene returns
-at most 20 new candidates per query and 40 in total. After receiving the search results,
-rank only those candidates and call present_layer_results with up to ten relevant IDs in
-ranked order. After presentation give a short final reply.
+For a thematic map search, use short German terms. Search the main word from the question
+first and simplify longer terms, e.g. Hochwasser instead of Hochwassergefahr or Strassenlärm
+instead of Strassenverkehrslärm. Search separate topics separately. If you also search a
+synonym, send it as its own call in the same batch. On an empty first search try a shorter term
+or a related map term, e.g. Fliesstiefen for flooding.
+Use at most three search_layers calls. Rank only those candidates and call present_layer_results
+with up to ten relevant IDs in ranked order. After presentation give a short final reply.
 If nothing fits, present an empty list, explain the uncertainty and suggest a more
 specific question. The UI displays the numbered list; summarize briefly.
 
 The UI shows the verified count or a suggestion for refining an empty search.
+For a factual question about an address, call resolve_location with the street, house number and
+locality. Search for the specific individual layer with search_layers in the same tool batch.
+Use the coordinates of the unique resolved address and the relevant individual layer's actual ID
+with query_features. Ask for clarification if the address is ambiguous. An unavailable dataset
+does not establish that no features exist. Do not publish a map result list for a data query.
+Do not substitute a point for the full geometry of a parcel or other area.
 For a numbered follow-up, use the exact ID at that position of the latest presented list.
+Address and parcel numbers are not numbered map results.
 Use get_layer_details for metadata, add_layer to show it, and remove_layer to remove it.
 Keep that list intact unless the user explicitly asks for a new search. Describe only
 metadata that the tool returned; do not infer group members from a group title.
@@ -104,6 +121,11 @@ class Chat(Payload):
     history: list[Turn] = Field(default_factory=list, max_length=limits["historyTurns"])
     rounds: list[Round] = Field(default_factory=list, max_length=limits["rounds"] - 1)
     last_results: list[Reference] = Field(default_factory=list, max_length=schemas["present_layer_results"]["properties"]["ids"]["maxItems"])
+
+
+class GeoCall(Payload):
+    name: Literal["search_layers", "get_layer_details", "resolve_location", "query_features"]
+    args: dict
 
 
 def valid(value, schema):
@@ -192,7 +214,38 @@ def map_command(message):
     return None
 
 
+def tool_results(chat, name):
+    return [json.loads(result.content) for step in chat.rounds
+            for call, result in zip(step.calls, step.results) if call.function.name == name]
+
+
+def address_question(message):
+    return bool(street_address.search(message) and not map_words.search(message))
+
+
+def resolved_point(chat):
+    resolutions = tool_results(chat, "resolve_location")
+    location = resolutions[-1].get("data") if resolutions else None
+    if isinstance(location, dict) and location.get("status") == "resolved":
+        candidates = location.get("candidates")
+        if isinstance(candidates, list) and len(candidates) == 1 and isinstance(candidates[0], dict):
+            return candidates[0].get("easting"), candidates[0].get("northing")
+    return None
+
+
 def tool_choice_for(chat, message, mutation):
+    prior_calls = {call.function.name for step in chat.rounds for call in step.calls}
+    search_outcomes = tool_results(chat, "search_layers")
+    if address_question(message):
+        if not chat.rounds:
+            return "required"
+        if resolved_point(chat) is not None and "query_features" not in prior_calls:
+            if not search_outcomes:
+                return {"type": "function", "function": {"name": "search_layers"}}
+            if any(isinstance(result.get("data"), dict) and result["data"].get("layers")
+                   for result in search_outcomes):
+                return {"type": "function", "function": {"name": "query_features"}}
+        return "auto"
     search_request = (
         re.match(r"^(?:such(?:e)?|find(?:e)?|search)\b(?!\s+(?:nicht|not)\b)", message)
         or re.match(r"^(?:zeig(?:e)?|show)\s+(?:(?:mir|me)\s+)?(?:(?:die|the)\s+)?"
@@ -201,9 +254,6 @@ def tool_choice_for(chat, message, mutation):
             and not re.search(r"\b(?:sichtbar|visible|geladen|eingeblendet)\b", message))
         or re.search(r"\bkartiert\b", message)
     )
-    prior_calls = {call.function.name for step in chat.rounds for call in step.calls}
-    search_outcomes = [json.loads(result.content) for step in chat.rounds
-                       for call, result in zip(step.calls, step.results) if call.function.name == "search_layers"]
     if search_request:
         if not chat.rounds:
             return "required"
@@ -224,7 +274,8 @@ def tool_choice_for(chat, message, mutation):
         if ("get_map_state" not in prior_calls and re.search(r"\b(?:karte|map)\b", message)
             and re.search(r"\b(?:koordinatenreferenzsystem|koordinatensystem|crs|massstab|maßstab|scale|zentriert|centered)\b", message)):
             return {"type": "function", "function": {"name": "get_map_state"}}
-    numbered = result_number.search(message)
+    numbered = next((match for match in result_number.finditer(message)
+                     if not location_ordinal_prefix.search(message[:match.start()])), None)
     if numbered and not chat.last_results:
         return "auto"
     name = mutation or ("get_layer_details" if metadata_request.search(message) else None)
@@ -261,8 +312,166 @@ def health():
     return {"status": "UP"}
 
 
-@app.post("/api/v1/chat")
-async def chat(request: Request):
+geo_origin = "https://geo.so.ch"
+search_path = "/api/search/v2/fts/"
+address_layer = "ch.so.agi.av.gebaeudeadressen.gebaeudeeingaenge"
+address_parts = re.compile(r"(.+?)\s+(\d+[a-z]?)(?:\s+(?:in\s+)?(?:(\d{4})(?:\s+|$))?(.*))?", re.IGNORECASE)
+links = re.compile(r"(?:https?://|attachment://|www\.)\S+", re.IGNORECASE)
+
+
+def geo_text(value, length):
+    if not isinstance(value, str):
+        return ""
+    text = re.sub(r"<[^>]*>", " ", html.unescape(value))
+    return " ".join(links.sub(" ", text).split())[:length]
+
+
+async def get_geo(path, params, unavailable, invalid, missing=None):
+    try:
+        async with httpx.AsyncClient(base_url=geo_origin, timeout=6, trust_env=False) as client, asyncio.timeout(9):
+            async with client.stream("GET", path, params=params, headers={"Accept": "application/json"}) as response:
+                if response.status_code == 404 and missing:
+                    raise HTTPException(404, missing)
+                response.raise_for_status()
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(body) + len(chunk) > 4 * 1024 * 1024:
+                        raise HTTPException(502, invalid)
+                    body.extend(chunk)
+        data = json.loads(body)
+    except (httpx.HTTPError, TimeoutError) as exc:
+        raise HTTPException(502, unavailable) from exc
+    except (ValueError, RecursionError) as exc:
+        raise HTTPException(502, invalid) from exc
+    if not isinstance(data, dict):
+        raise HTTPException(502, invalid)
+    return data
+
+
+async def search_layers(query):
+    term = query.strip()
+    data = await get_geo(search_path, {"searchtext": f"Karte: {term}", "limit": 10},
+                         "catalogUnavailable", "invalidCatalog")
+    if not isinstance(data.get("results"), list):
+        raise HTTPException(502, "invalidCatalog")
+
+    roots, children = [], []
+    pending = [(row.get("dataproduct"), "") for row in data["results"] if isinstance(row, dict)]
+    words = re.findall(r"\w+", term.casefold())
+    for row, parent in pending:
+        if not isinstance(row, dict):
+            continue
+        ident, title = row.get("dataproduct_id"), geo_text(row.get("display"), 120)
+        if not valid(ident, id_schema) or not title:
+            continue
+        entry = {"id": ident, "title": title}
+        if parent:
+            relevance = sum(word in f"{title} {ident}".casefold() for word in words)
+            if relevance:
+                children.append((relevance, {**entry, "themeTitle": parent}))
+        else:
+            roots.append(entry)
+        if isinstance(row.get("sublayers"), list):
+            pending.extend((child, title) for child in row["sublayers"])
+
+    layers = {}
+    for entry in roots + [entry for _, entry in sorted(children, key=lambda item: -item[0])]:
+        layers.setdefault(entry["id"], entry)
+    return {"layers": list(layers.values())[:limits["perSearch"]]}
+
+
+async def get_layer_details(id):
+    data = await get_geo("/api/dataproduct/v1/weblayers", {"filter": id},
+                         "catalogUnavailable", "invalidCatalog", "layerUnknown")
+    nodes = data.get(id, [])
+    if not isinstance(nodes, list):
+        raise HTTPException(502, "invalidCatalog")
+    node = next((item for item in nodes if isinstance(item, dict) and item.get("name") == id), None)
+    if node is None:
+        raise HTTPException(404, "layerUnknown")
+    title = geo_text(node.get("title"), 120)
+    if not title:
+        raise HTTPException(502, "invalidCatalog")
+    return {"id": id, "qwcLayerName": id, "title": title,
+            "type": "layergroup" if node.get("sublayers") else "layer",
+            "description": geo_text(node.get("abstract"), 1800)}
+
+
+def address_fields(text):
+    text = " ".join(text.casefold().replace(",", " ").split())
+    match = address_parts.fullmatch(text)
+    return match.groups(default="") if match else None
+
+
+async def resolve_location(address):
+    requested = address_fields(address)
+    if requested is None:
+        raise HTTPException(400, "invalidLocation")
+    searchtext = " ".join(part for part in requested if part)
+    data = await get_geo(search_path, {"searchtext": searchtext, "filter": address_layer, "limit": 10},
+                         "locationUnavailable", "invalidLocation")
+    if not isinstance(data.get("results"), list):
+        raise HTTPException(502, "invalidLocation")
+    candidates = {}
+    coordinates = schemas["query_features"]["properties"]
+    for row in data["results"]:
+        hit = row.get("feature") if isinstance(row, dict) else None
+        if not isinstance(hit, dict) or hit.get("dataproduct_id") != address_layer:
+            continue
+        label = geo_text(hit.get("display"), 160)
+        actual = address_fields(label.removesuffix(" (Adresse)"))
+        if not actual or not all(not part or part == actual[i] for i, part in enumerate(requested)):
+            continue
+        bbox = hit.get("bbox")
+        if (hit.get("srid") != "EPSG:2056" or not isinstance(bbox, list) or len(bbox) != 4
+                or bbox[:2] != bbox[2:] or not valid(bbox[0], coordinates["easting"])
+                or not valid(bbox[1], coordinates["northing"])):
+            raise HTTPException(502, "invalidLocation")
+        candidates[(*bbox[:2], label)] = {"label": label, "easting": bbox[0], "northing": bbox[1]}
+    status = "resolved" if len(candidates) == 1 else "ambiguous" if candidates else "not_found"
+    return {"status": status, "candidates": list(candidates.values())[:5]}
+
+
+async def query_features(dataset_id, easting, northing):
+    geometry = {"type": "Point", "coordinates": [easting, northing],
+                "crs": {"type": "name", "properties": {"name": "EPSG:2056"}}}
+    limit = 5
+    data = await get_geo(f"/api/data/v1/{quote(dataset_id, safe='')}/",
+                         {"filter_geom": json.dumps(geometry, separators=(",", ":")), "limit": limit},
+                         "dataUnavailable", "invalidData", "datasetUnavailable")
+    raw_features = data.get("features")
+    number_matched = data.get("numberMatched")
+    if (data.get("type") != "FeatureCollection" or not isinstance(raw_features, list)
+            or type(number_matched) is not int or number_matched < len(raw_features)):
+        raise HTTPException(502, "invalidData")
+    features = []
+    for feature in raw_features[:limit]:
+        if not isinstance(feature, dict) or not isinstance(feature.get("properties"), dict):
+            raise HTTPException(502, "invalidData")
+        properties = {}
+        for key, value in feature["properties"].items():
+            key = geo_text(key, 64)
+            if not key:
+                continue
+            if isinstance(value, str):
+                value = geo_text(value, 150)
+                if not value:
+                    continue
+            elif type(value) not in (bool, int) and not (isinstance(value, float) and math.isfinite(value)):
+                continue
+            properties.setdefault(key, value)
+            if len(properties) >= 12:
+                break
+        features.append({"properties": properties})
+    return {"dataset_id": dataset_id, "features": features, "numberMatched": number_matched,
+            "numberReturned": len(features), "partial": number_matched > len(features)}
+
+
+geo_tools = {"search_layers": search_layers, "get_layer_details": get_layer_details,
+             "resolve_location": resolve_location, "query_features": query_features}
+
+
+async def request_body(request):
     if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
         raise HTTPException(415, "jsonRequired")
     body = bytearray()
@@ -274,6 +483,24 @@ async def chat(request: Request):
                 body.extend(chunk)
     except (TimeoutError, ClientDisconnect) as exc:
         raise HTTPException(408, "requestTimeout") from exc
+    return body
+
+
+@app.post("/api/v1/geo")
+async def geo(request: Request):
+    body = await request_body(request)
+    try:
+        payload = GeoCall.model_validate_json(body)
+        if not valid(payload.args, schemas[payload.name]):
+            raise ValueError("invalid tool arguments")
+    except (ValueError, RecursionError) as exc:
+        raise HTTPException(400, "invalidTool") from exc
+    return await geo_tools[payload.name](**payload.args)
+
+
+@app.post("/api/v1/chat")
+async def chat(request: Request):
+    body = await request_body(request)
     try:
         payload = Chat.model_validate_json(body)
         messages, used_ids, searches = messages_for(payload)
@@ -323,8 +550,14 @@ async def chat(request: Request):
             raise ValueError("map tool not requested")
         if tool_choice != "auto" and not calls:
             raise ValueError("required tool call missing")
-        if tool_choice == "required" and any(call.function.name != "search_layers" for call in calls):
-            raise ValueError("unexpected search tool")
+        factual_address = address_question(phrase)
+        if tool_choice == "required":
+            names = {call.function.name for call in calls}
+            if factual_address:
+                if "resolve_location" not in names or not names <= {"resolve_location", "search_layers"}:
+                    raise ValueError("address must be resolved first")
+            elif names != {"search_layers"}:
+                raise ValueError("unexpected search tool")
         if isinstance(tool_choice, dict):
             name = tool_choice["function"]["name"]
             if any(call.function.name != name for call in calls):
@@ -337,6 +570,12 @@ async def chat(request: Request):
                     raise ValueError("invalid read tool arguments")
                 call.function.arguments = "{}"
         searches += check_calls(calls, used_ids)
+        if factual_address:
+            for call in calls:
+                if call.function.name == "query_features":
+                    args = json.loads(call.function.arguments)
+                    if (args["easting"], args["northing"]) != resolved_point(payload):
+                        raise ValueError("query uses an unverified point")
         if calls and (len(payload.rounds) + 1 >= limits["rounds"] or len(used_ids) > limits["calls"]
                       or searches > limits["searches"]):
             raise HTTPException(409, "chatLimit")

@@ -35,6 +35,13 @@ function errorLabel(code) {
     case 'layerNotOnMap': return LocaleUtils.tr('aichat.error.layerNotOnMap');
     case 'catalogUnavailable': return LocaleUtils.tr('aichat.error.catalog');
     case 'invalidCatalog': return LocaleUtils.tr('aichat.error.catalogResponse');
+    case 'geoUnavailable':
+    case 'locationUnavailable':
+    case 'dataUnavailable': return LocaleUtils.tr('aichat.error.geo');
+    case 'invalidGeoResponse':
+    case 'invalidLocation':
+    case 'invalidData': return LocaleUtils.tr('aichat.error.geoResponse');
+    case 'datasetUnavailable': return LocaleUtils.tr('aichat.error.dataset');
     case 'mapNotReady': return LocaleUtils.tr('aichat.error.map');
     case 'themeChanged': return LocaleUtils.tr('aichat.error.theme');
     case 'invalidTool': return LocaleUtils.tr('aichat.error.invalidTool');
@@ -198,7 +205,6 @@ export default function AIChatPlugin() {
                                     </div>
                                     {details?.id === layer.id ? (
                                         <div className="aichat-detail">
-                                            {details.organization ? <div>{details.organization}</div> : null}
                                             <p>{details.description}</p>
                                             <small>{details.id}</small>
                                         </div>

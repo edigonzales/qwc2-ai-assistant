@@ -6,9 +6,9 @@ const {createRemoteMiddleware} = require('./remote.cjs');
 
 const mime = {'.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.wasm': 'application/wasm', '.pdf': 'application/pdf', '.xml': 'application/xml'};
 
-function createServer({staticRoot = path.join(__dirname, '../prod'), catalogOrigin = process.env.CATALOG_API_ORIGIN || 'http://127.0.0.1:8084', fetchImpl = fetch} = {}) {
+function createServer({staticRoot = path.join(__dirname, '../prod'), assistantOrigin = process.env.ASSISTANT_API_ORIGIN || 'http://127.0.0.1:8083', fetchImpl = fetch} = {}) {
     const root = fs.realpathSync(staticRoot);
-    const remote = createRemoteMiddleware({staticRoot: root, catalogOrigin, fetchImpl});
+    const remote = createRemoteMiddleware({staticRoot: root, assistantOrigin, fetchImpl});
     return http.createServer(async (req, res) => {
         res.setHeader('X-Content-Type-Options', 'nosniff');
         try {
@@ -18,7 +18,7 @@ function createServer({staticRoot = path.join(__dirname, '../prod'), catalogOrig
                     if (rawPath === '/healthz') {
                         let ready = false;
                         try {
-                            const response = await fetchImpl(catalogOrigin.replace(/\/$/, '') + '/q/health/ready', {signal: AbortSignal.timeout(3000), redirect: 'error'});
+                            const response = await fetchImpl(assistantOrigin.replace(/\/$/, '') + '/healthz', {signal: AbortSignal.timeout(3000), redirect: 'error'});
                             ready = response.ok && (await response.json()).status === 'UP';
                         } catch { /* Readiness remains false until the backend is available. */ }
                         res.writeHead(ready ? 200 : 503, {'Content-Type': 'application/json', 'Cache-Control': 'no-store'});

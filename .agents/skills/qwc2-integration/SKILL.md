@@ -12,14 +12,17 @@ For layers, preserve the tested path: current state -> themeLayerRestorer for
 missing definitions -> current state again -> visibility via
 `changeLayerProperty` or missing layers via `addThemeSublayer`. Prevent
 unintended duplicates and changes after theme switches. Groups, parent
-visibility, external WMS and layer roles matter. Read metadata only from the
-existing `edigonzales/kartenkatalog` API, using stable `id` / `qwcLayerName`.
-Do not invent service URLs or implement another layer registry.
+visibility, external WMS and layer roles matter. Use the cantonal search for
+candidate IDs and `weblayers` for the display name, abstract and QWC definition.
+A facade is one map layer; the native feature-info service resolves its
+children. Point queries use a concrete published Data Service ID. An empty
+FeatureCollection is a successful query; a failed request cannot establish
+that there are no matches.
 
-Keep remote proxy rules explicit: public GET/HEAD for approved Solothurn and
-catalog routes; one fixed same-origin POST chat route to the local Python
-backend; never forward cookies, credentials or arbitrary URLs. Query inputs
-are escaped and bounded. Test negative paths as well as the successful case.
+Keep remote proxy rules explicit: public GET/HEAD for approved Solothurn routes
+and fixed same-origin POST routes for chat and geo reads to FastAPI. Never
+forward cookies, credentials or arbitrary URLs. Keep tool inputs and results
+bounded and follow the existing shared tool schemas.
 
 Review actual map-state changes in a browser, not just Redux action calls.
 Use the normal LayerTree and QWC URL state as observable integration points.
