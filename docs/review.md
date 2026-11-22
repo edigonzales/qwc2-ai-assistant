@@ -101,3 +101,18 @@ Lokal bestanden 41 Node- und 28 Python-Tests, gezieltes ESLint und
 Präsentation, die Fortsetzung ohne Abschlussmarkierung und eine abgelehnte
 Treffer-ID ab. Die letzten beiden Fälle wurden mit vorgegebenen
 Modellantworten geprüft.
+
+## Objektinfo bei offenem Chat
+
+Basis `9aa9475e2a2d98ce1a3677a7cdf2543ea7f519b7`, geprüft
+`362710c7b8be435615c2cff3de7a876ba63cb4b9`. **PASS** mit OpenCode 2.0.28
+und `deepseek/deepseek-flash`. Der Review prüfte den Eintrag in der
+Plugin-Konfiguration und führte sieben Server-Tests aus.
+
+Im Desktop-Browser öffnete ein Kartenklick im eBau-Thema die nativen
+«Objektinformationen» mit einem sichtbaren Treffer. Der Solothurner
+GetFeatureInfo-Aufruf lieferte HTTP 200. Der KI-Assistent und sein
+Eingabeentwurf blieben sichtbar. Der Proxy lieferte `mapClickAction: 'identify'`
+in beiden Gerätekonfigurationen. Der Klick wurde auf dem Desktop geprüft.
+
+Lokal bestanden 41 Node-Tests und `git diff --check`.
