@@ -7,6 +7,7 @@ import Spinner from 'qwc2/components/widgets/Spinner';
 import LocaleUtils from 'qwc2/utils/LocaleUtils';
 
 import {errorCode, runConversation} from './aichat/conversation.mjs';
+import {createDiagnostics} from './aichat/diagnostics.mjs';
 import {createQwcTurnTools} from './aichat/qwc';
 import {limits, numberedLayer} from './aichat/tools.mjs';
 
@@ -107,6 +108,7 @@ export default function AIChatPlugin() {
         const message = input.trim();
         if (!message || active.current) return;
         const controller = new AbortController();
+        const diagnostics = createDiagnostics();
         active.current = controller;
         setInput('');
         setError(null);
@@ -117,11 +119,11 @@ export default function AIChatPlugin() {
         try {
             let presented;
             const runTool = createQwcTurnTools(store, {
-                signal: controller.signal, onResults: rows => { presented = rows; }
+                signal: controller.signal, diagnostics, onResults: rows => { presented = rows; }
             });
             const history = turns.map(({user, assistant}) => ({user, assistant}));
             const result = await runConversation({
-                message, history, lastResults: results, runTool, signal: controller.signal,
+                message, history, lastResults: results, runTool, signal: controller.signal, diagnostics,
                 onAction: (name, data) => confirmations.push(actionLabel(name, data))
             });
             controller.signal.throwIfAborted();
@@ -139,7 +141,11 @@ export default function AIChatPlugin() {
                 setDetails(null);
             }
             setError(issue ? {code: issue, partial: confirmations.length > 0} : null);
+            diagnostics.record('chat.display', {display: confirmations.length ? 'map_confirmation' : issue ? 'error' : presented ? 'results' : 'model_text',
+                result_count: presented?.length, confirmations: confirmations.length, error: issue});
         } catch (err) {
+            diagnostics.record('chat.display', {display: controller.signal.aborted ? 'aborted' : 'error',
+                error: controller.signal.aborted ? undefined : errorCode(err), confirmations: confirmations.length});
             if (!controller.signal.aborted) {
                 setError({code: errorCode(err), partial: confirmations.length > 0});
                 if (confirmations.length) {
@@ -158,17 +164,22 @@ export default function AIChatPlugin() {
         const layer = numberedLayer(results, number);
         if (!layer || active.current) return;
         const controller = new AbortController();
+        const diagnostics = createDiagnostics();
         active.current = controller;
         setError(null);
         setNotice(null);
         setBusy(true);
+        const start = performance.now();
         try {
-            const runTool = createQwcTurnTools(store, {signal: controller.signal});
+            const runTool = createQwcTurnTools(store, {signal: controller.signal, diagnostics});
             const data = await runTool(name, {id: layer.id});
             controller.signal.throwIfAborted();
             if (name === 'get_layer_details') setDetails(data);
             else setNotice(data);
+            diagnostics.record('result.action', {tool: name, duration_ms: performance.now() - start, map_confirmed: name === 'add_layer'});
         } catch (err) {
+            diagnostics.record('result.action', {tool: name, duration_ms: performance.now() - start,
+                error: controller.signal.aborted ? 'aborted' : errorCode(err, 'toolFailed')});
             if (!controller.signal.aborted) setError({code: errorCode(err, 'toolFailed')});
         } finally {
             if (active.current === controller) cancel();
