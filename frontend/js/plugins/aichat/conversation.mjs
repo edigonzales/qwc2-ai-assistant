@@ -98,6 +98,10 @@ export async function runConversation({message, history, lastResults, runTool, s
                 diagnostics.record('tool.result', {round: roundId, tool: name, call_index: results.length + 1,
                     duration_ms: performance.now() - toolStart, result_count: Array.isArray(entries) ? entries.length : undefined,
                     map_confirmed: mapActions.has(name)});
+                if (name === 'present_layer_results' && args.search_only === true && calls.length === 1 &&
+                    searches > 0 && callIds.size === searches + 1 && errors.size === 0) {
+                    return {assistant: '', errors: []};
+                }
             } catch (error) {
                 signal?.throwIfAborted();
                 const code = errorCode(error, 'toolFailed');

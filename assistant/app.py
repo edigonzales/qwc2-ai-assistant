@@ -59,11 +59,11 @@ instead of Strassenverkehrslärm. Search separate topics separately. If you also
 synonym, send it as its own call in the same batch. On an empty first search try a shorter term
 or a related map term, e.g. Fliesstiefen for flooding.
 Use at most three search_layers calls. Rank only those candidates and call present_layer_results
-with up to ten relevant IDs in ranked order. After presentation give a short final reply.
-If nothing fits, present an empty list, explain the uncertainty and suggest a more
-specific question. The UI displays the numbered list; summarize briefly.
-
-The UI shows the verified count or a suggestion for refining an empty search.
+with up to ten relevant IDs in ranked order. If nothing fits, pass an empty list.
+If the user only wants to find maps, call present_layer_results on its own with search_only true.
+The UI displays the numbered list and verified count or suggests refining an empty search.
+No final text is needed for this case. If the request needs further tools or an explanation,
+leave search_only false and continue after presentation.
 For a factual question about an address, call resolve_location with the street, house number and
 locality. Search for the specific individual layer with search_layers in the same tool batch.
 Use the coordinates of the unique resolved address and the relevant individual layer's actual ID
@@ -146,6 +146,8 @@ def valid(value, schema):
     if kind == "number":
         return (type(value) in (int, float) and schema["minimum"] <= value <= schema["maximum"]
                 and math.isfinite(value))
+    if kind == "boolean":
+        return isinstance(value, bool)
     if kind == "array":
         return isinstance(value, list) and len(value) <= schema["maxItems"] and all(valid(v, schema["items"]) for v in value)
     return False

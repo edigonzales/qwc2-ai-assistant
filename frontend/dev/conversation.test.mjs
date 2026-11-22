@@ -70,6 +70,29 @@ test('a searched ID may be used in the same response batch after its search', as
     assert.deepEqual(executed, [['search_layers', {query: 'Wasser'}], ['add_layer', {id: 'known'}]]);
 });
 
+test('only a successful search-only presentation ends the turn without another request', async() => {
+    const layer = {id: 'ch.so.wasser', title: 'Wasser'};
+    for (const [searchOnly, id, requests] of [[true, layer.id, 2], [false, layer.id, 3], [true, 'invented', 3]]) {
+        const steps = [
+            reply(null, call('search', 'search_layers', {query: 'Wasser'})),
+            reply(null, call('list', 'present_layer_results', {ids: [id], search_only: searchOnly})),
+            reply('Weitere Antwort')
+        ];
+        let presented;
+        const result = await runConversation({
+            message: 'Suche Karten zu Wasser', history: [], lastResults: [],
+            fetchImpl: () => steps.shift(),
+            runTool: createTurnTools({
+                fetchImpl: () => Response.json({layers: [layer]}),
+                onResults: rows => { presented = rows; }
+            })
+        });
+        assert.equal(steps.length, 3 - requests);
+        assert.deepEqual(presented?.map(row => row.id), id === layer.id ? [id] : undefined);
+        assert.deepEqual(result.errors, id === layer.id ? [] : ['unknownCandidate']);
+    }
+});
+
 test('a visible QWC name cannot substitute for a catalog ID', async() => {
     const steps = [
         reply(null, call('v', 'get_visible_layers'), call('r', 'remove_layer', {id: 'qwc.alias'})),
