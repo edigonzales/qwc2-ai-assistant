@@ -52,7 +52,7 @@ test('shares the live configuration adapter with development mode', async t => {
         return Response.json({plugins: {desktop: [{name: 'Editing'}]}});
     });
     const config = JSON.parse((await request('/map/%63onfig.json?lang=de-CH&tenant=other')).body);
-    assert.deepEqual(config.plugins.desktop, [{name: 'AIChat'}]);
+    assert.deepEqual(config.plugins.desktop, [{name: 'AIChat', mapClickAction: 'identify'}]);
 });
 test('encoded live config has no local fallback if upstream is down', async t => {
     const request = await fixture(t);
