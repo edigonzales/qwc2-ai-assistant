@@ -31,4 +31,33 @@ Phasenbasis `66f7b13e3fa695bf86b21768bcb8a28507d5f73b`. Jede Prüfung lief in ei
 
 Im finalen Review bestanden 45 Node- und 23 isolierte SDK-Tests, beide Diff-Prüfungen und gezielte Gegenproben zu Tool-Freigabe, frischen Daten, Katalog-IDs und Kartenbestätigungen. Freiere Befehlsvarianten können ausserhalb der erkannten Formen liegen. Der Reviewer verwendete Offline-Tests und führte die Live-Prüfungen nicht erneut aus.
 
-Lokal bestanden ESLint, Compose-Build und Compose-Konfigurationsprüfung. Chromium prüfte Host- und Compose-Betrieb, Desktop und Mobilgrösse, echten Kartenzustand, Hinzufügen ohne Duplikat, Entfernen, LV95-Zentrierung, Wassersuche, nummerierte Treffer, Direktklicks ohne Modellaufruf und unbekannte IDs. Die beiden korrigierten Entfernungsvarianten und der vollständige Kartenablauf wurden auf dem geprüften Produktcommit mit echtem Katalog, QWC2 und Infomaniak wiederholt. Für den gemischten 404-/Erfolgsfall steuerte eine vorgegebene Modellantwort einen echten Quarkus-404 und eine echte QWC2-Entfernung an. Abbruch während eines Katalogzugriffs, gestoppter Quarkus und die isoliert unterbrochene Infomaniak-Verbindung wurden im Browser geprüft. Danach wurden die Dienste wiederhergestellt. Die Laufzeitparameter wurden mit `Qwen/Qwen3.8-27B-FP8` geprüft. [Suchmessung mit zehn Fachfragen](search-quality.md)
+Lokal bestanden ESLint, Compose-Build und Compose-Konfigurationsprüfung. Chromium prüfte Host- und Compose-Betrieb, Desktop und Mobilgrösse, echten Kartenzustand, Hinzufügen ohne Duplikat, Entfernen, LV95-Zentrierung, Wassersuche, nummerierte Treffer, Direktklicks ohne Modellaufruf und unbekannte IDs. Die beiden korrigierten Entfernungsvarianten und der vollständige Kartenablauf wurden auf dem geprüften Produktcommit mit echtem Katalog, QWC2 und Infomaniak wiederholt. Für den gemischten 404-/Erfolgsfall steuerte eine vorgegebene Modellantwort einen echten Quarkus-404 und eine echte QWC2-Entfernung an. Abbruch während eines Katalogzugriffs, gestoppter Quarkus und die isoliert unterbrochene Infomaniak-Verbindung wurden im Browser geprüft. Danach wurden die Dienste wiederhergestellt. Die Laufzeitparameter wurden mit `Qwen/Qwen3.8-27B-FP8` geprüft. [Quarkus-Suchmessung mit zehn Fachfragen](https://github.com/edigonzales/qwc2-ai-assistant/blob/ae02592b605ad671d932c024598216afed891da9/docs/search-quality.md)
+
+## Kantonsuche und Punktabfrage
+
+Basis `ae02592b605ad671d932c024598216afed891da9`. OpenCode 2.0.28 mit
+`deepseek/deepseek-flash` prüfte `2cf8c7058e2946732d9ac141669071576fc24b40`
+und meldete **FAIL**. Allgemeine Suchaufträge und die Klosterplatz-Frage
+konnten ohne Toolantwort beantwortet werden. Der Adresszusatz «in» konnte
+zudem zu einer leeren Suche führen.
+
+Die Nachprüfung von `259ff937d4f04a72154c7016a142ac73e86b9afc` mit
+demselben Modell ergab **PASS**. Explizite Suchaufträge erfordern die
+Kartensuche. Der erkannte Adressfall erfordert die Auflösung und bindet die
+Fachabfrage an deren Punkt. Die Adresssuche normalisiert «in» vor dem Ort.
+Der Erstreview prüfte 40 Node- und 26 Python-Tests, Compose-Konfiguration
+und kantonale Live-Antworten. Die Nachprüfung wiederholte die 26 Python-Tests
+und prüfte die korrigierte Toolauswahl und Adressnormalisierung. Die
+serverseitige Erzwingung erkennt bestimmte Adressformulierungen. Die
+Auswahl des fachlich passenden Datensatzes bleibt modellgesteuert.
+
+Lokal bestanden 40 Node- und 26 Python-Tests, gezieltes ESLint, Hoststart
+und Compose-Build. Im abschliessenden Compose-Lauf lieferte Chromium bei
+allen zehn Suchfragen passende Treffer auf Rang 1. Beide Bundesinventare
+erschienen. Die Grundwassergruppe wurde nach dem Detailabruf im Ebenenbaum
+angezeigt und per Treffernummer entfernt. Klosterplatz 1 ergab in der
+echten Fachabfrage `Au`. Die Geo-API bestätigte ebenfalls die normalisierte
+Adresse mit «in» und unterschied einen leeren Treffer von einem nicht
+verfügbaren Datensatz. Ein GetFeatureInfo-Aufruf für die Fassade
+«Grundnutzung» lieferte weiterhin die Antworten der beiden Kinder.
+[Suchmessung](search-quality.md)
