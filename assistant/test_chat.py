@@ -1,0 +1,303 @@
+import json
+import os
+import unittest
+from unittest.mock import patch
+
+import httpx2 as httpx
+from fastapi.testclient import TestClient
+from openai import AsyncOpenAI
+
+from app import Chat, app, limits, map_command, tool_choice_for as choose_tool
+
+
+def tool_choice_for(chat):
+    message = chat.message.strip().lower()
+    return choose_tool(chat, message, map_command(message))
+
+
+def call(name="get_map_state", identifier="call_m", arguments=None):
+    return {"id": identifier, "type": "function",
+            "function": {"name": name, "arguments": json.dumps({} if arguments is None else arguments)}}
+
+
+def step(*calls):
+    return {"calls": list(calls), "results": [
+        {"tool_call_id": entry["id"], "content": '{"ok":true,"data":{"crs":"EPSG:2056"}}'} for entry in calls
+    ]}
+
+
+def completion(content=None, calls=None):
+    message = {"role": "assistant", "content": content}
+    if calls is not None:
+        message["tool_calls"] = calls
+    return {"id": "test", "model": "mock", "created": 1, "object": "chat.completion",
+            "choices": [{"index": 0, "finish_reason": "tool_calls" if calls else "stop", "message": message}]}
+
+
+class ChatTests(unittest.TestCase):
+    def setUp(self):
+        self.api = TestClient(app, base_url="http://127.0.0.1")
+        self.addCleanup(self.api.close)
+        self.requests = []
+
+    def send(self, payload, *responses):
+        def respond(req):
+            self.assertEqual(req.url.path, "/chat/completions")
+            self.requests.append(json.loads(req.content))
+            response = responses[len(self.requests) - 1]
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+        def client():
+            return AsyncOpenAI(api_key="fixture", base_url="http://mock.test", max_retries=0,
+                               http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))), "mock"
+
+        with patch("app.infomaniak_client", side_effect=client):
+            return self.api.post("/api/v1/chat", json=payload)
+
+    def test_health_without_credentials_and_unconfigured_chat(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(self.api.get("/healthz").json(), {"status": "UP"})
+            response = self.api.post("/api/v1/chat", json={"message": "Guten Tag"})
+        self.assertEqual((response.status_code, response.json()), (503, {"detail": "modelNotConfigured"}))
+
+    def test_normal_completion_uses_fixed_system_and_tools(self):
+        response = self.send({"message": "Guten Tag"}, httpx.Response(200, json=completion("Hallo.")))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["assistant"]["content"], "Hallo.")
+        self.assertEqual(self.requests[0]["messages"][0]["role"], "system")
+        self.assertEqual(self.requests[0]["messages"][1], {"role": "user", "content": "Guten Tag"})
+        self.assertFalse(self.requests[0]["stream"])
+        self.assertEqual(len(self.requests[0]["tools"]), 5)
+
+    def test_one_or_multiple_calls_and_continuation_preserve_order_and_ids(self):
+        calls = [call(), call("get_visible_layers", "call_l")]
+        for batch in [calls[:1], calls]:
+            with self.subTest(size=len(batch)):
+                self.requests.clear()
+                first = self.send({"message": "Kartenstatus"}, httpx.Response(200, json=completion(calls=batch)))
+                self.assertEqual(first.json()["assistant"]["tool_calls"], batch)
+                self.requests.clear()
+                follow_up = self.send({"message": "Kartenstatus", "rounds": [step(*batch)]},
+                                      httpx.Response(200, json=completion("EPSG:2056")))
+                self.assertEqual(follow_up.status_code, 200)
+                sent = self.requests[0]["messages"]
+                self.assertEqual(sent[2]["tool_calls"], batch)
+                self.assertEqual([message["tool_call_id"] for message in sent[3:]], [entry["id"] for entry in batch])
+
+    def test_numbered_context_and_plain_history(self):
+        payload = {
+            "message": "Zeig Nummer 2",
+            "history": [{"user": "Suche Wasser", "assistant": "Hier sind zwei Karten."}],
+            "last_results": [{"id": "water.one", "title": "Fluss"}, {"id": "water.two", "title": "See"}],
+        }
+        self.send(payload, httpx.Response(200, json=completion(calls=[call("add_layer", arguments={"id": "water.two"})])))
+        messages = self.requests[0]["messages"]
+        self.assertEqual([message["role"] for message in messages], ["system", "user", "assistant", "user"])
+        self.assertIn('"number": 2, "id": "water.two"', messages[-1]["content"])
+        self.assertEqual(self.requests[0]["tool_choice"], {"type": "function", "function": {"name": "add_layer"}})
+
+    def test_explicit_map_action_requires_the_bound_tool(self):
+        for model_reply in [completion("Angezeigt."), completion(calls=[call()])]:
+            self.requests.clear()
+            response = self.send({"message": "Zeige den Layer mit ID ch.so.agi.gemeindegrenzen auf der Karte."},
+                                 httpx.Response(200, json=model_reply))
+            self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+
+    def test_numbered_details_and_negated_or_list_requests_do_not_force_mutations(self):
+        references = [{"id": "water.one", "title": "Fluss"}]
+        details = Chat(message="Zeig mir Details zu Nummer 1", last_results=references)
+        self.assertEqual(tool_choice_for(details), {"type": "function", "function": {"name": "get_layer_details"}})
+        for message in ["Zeige Nummer 1 nicht auf der Karte", "Entferne Nummer 1 aus der Trefferliste"]:
+            self.assertEqual(tool_choice_for(Chat(message=message, last_results=references)), "auto")
+
+    def test_named_layer_requires_search_then_corresponding_map_tool(self):
+        message = "Entferne den Layer Gemeindegrenzen."
+        query = call("search_layers", "search", {"query": "Gemeindegrenzen"})
+        first = self.send({"message": message}, httpx.Response(200, json=completion(calls=[query])))
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(self.requests[0]["tool_choice"]["function"]["name"], "search_layers")
+        actual = step(query)
+        actual["results"][0]["content"] = '{"ok":true,"data":{"layers":[{"id":"ch.so.agi.gemeindegrenzen"}]}}'
+        self.requests.clear()
+        output = call("remove_layer", arguments={"id": "ch.so.agi.gemeindegrenzen"})
+        second = self.send({"message": message, "rounds": [actual]}, httpx.Response(200, json=completion(calls=[output])))
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(self.requests[0]["tool_choice"]["function"]["name"], "remove_layer")
+
+    def test_read_requests_never_force_map_mutation(self):
+        message = "Zeige mir Details zu Layer Gemeindegrenzen."
+        self.assertEqual(tool_choice_for(Chat(message=message))["function"]["name"], "search_layers")
+        actual = step(call("search_layers", "search", {"query": "Gemeindegrenzen"}))
+        actual["results"][0]["content"] = '{"ok":true,"data":{"layers":[{"id":"ch.so.agi.gemeindegrenzen"}]}}'
+        self.assertEqual(tool_choice_for(Chat(message=message, rounds=[actual]))["function"]["name"], "get_layer_details")
+        matches = [{"id": "visible.one", "title": "Eins"}, {"id": "visible.two", "title": "Zwei"}]
+        for phrase in ["Zeige die Legende zu Nummer 2.", "Zeige die Beschreibung von Ebene 2."]:
+            self.assertEqual(tool_choice_for(Chat(message=phrase, last_results=matches))["function"]["name"],
+                             "get_layer_details")
+        self.assertEqual(tool_choice_for(Chat(message="Zeige Layer 2 auf der Karte.", last_results=matches))["function"]["name"],
+                         "add_layer")
+        self.assertEqual(tool_choice_for(Chat(message="Nummer 2 anzeigen.", last_results=matches))["function"]["name"],
+                         "add_layer")
+
+    def test_read_turns_reject_model_proposed_mutations(self):
+        for message in ["Zeige die Legende der Gemeindegrenzen.", "Was ist der Layer ch.so.agi.gemeindegrenzen?",
+                        "Erkläre den Layer Gemeindegrenzen.", "Zeige mir, was der Layer Gemeindegrenzen enthält.",
+                        "Zeige die Layer die sichtbar sind", "Zeige die Layer auf der Karte",
+                        "Zeige mir ob Layer Gemeindegrenzen sichtbar ist",
+                        "Show me whether the layer ch.so.agi.gemeindegrenzen is visible."]:
+            self.requests.clear()
+            response = self.send({"message": message}, httpx.Response(200, json=completion(calls=[call(
+                "add_layer", arguments={"id": "ch.so.agi.gemeindegrenzen"}
+            )])))
+            self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+            names = {tool["function"]["name"] for tool in self.requests[0]["tools"]}
+            self.assertIn("get_layer_details", names)
+            self.assertTrue(names.isdisjoint({"add_layer", "remove_layer", "zoom_to_lv95"}))
+
+    def test_named_show_without_map_suffix_starts_with_catalog_search(self):
+        search = step(call("search_layers", "search", {"query": "Gemeindegrenzen"}))
+        search["results"][0]["content"] = '{"ok":true,"data":{"layers":[{"id":"ch.so.agi.gemeindegrenzen"}]}}'
+        for phrase in ["Zeige den Layer Gemeindegrenzen.", "Zeige den Layer «Gemeindegrenzen».",
+                       "Zeige den Layer „Gemeindegrenzen“.", "Zeige den Layer: Gemeindegrenzen."]:
+            self.assertEqual(tool_choice_for(Chat(message=phrase))["function"]["name"], "search_layers")
+            self.assertEqual(tool_choice_for(Chat(message=phrase, rounds=[search]))["function"]["name"], "add_layer")
+        self.assertEqual(tool_choice_for(Chat(message="Zeige die sichtbaren Layer im Kartenausschnitt."))["function"]["name"],
+                         "get_visible_layers")
+        self.assertEqual(tool_choice_for(Chat(message="Zeige Layer zum Thema Wasser.")), "required")
+
+    def test_visible_layer_question_requires_fresh_tool_data(self):
+        history = [{"user": "Welche Layer sind sichtbar?", "assistant": "Gemeindegrenzen sind sichtbar."}]
+        for message in ["Zeige die Layer die sichtbar sind", "Zeige die Layer auf der Karte"]:
+            self.requests.clear()
+            answer = self.send({"message": message, "history": history},
+                               httpx.Response(200, json=completion("Gemeindegrenzen sind sichtbar.")))
+            self.assertEqual((answer.status_code, answer.json()), (502, {"detail": "invalidModelResponse"}))
+            self.assertEqual(self.requests[0]["tool_choice"]["function"]["name"], "get_visible_layers")
+
+    def test_argument_free_read_discards_provider_fields(self):
+        output = call("get_visible_layers", arguments={"theme": "default"})
+        for message in ["Welche Layer sind sichtbar?", "Kartenstatus"]:
+            self.requests.clear()
+            response = self.send({"message": message}, httpx.Response(200, json=completion(calls=[output])))
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["assistant"]["tool_calls"], [call("get_visible_layers")])
+        self.requests.clear()
+        response = self.send({"message": "Welche Layer sind sichtbar?"},
+                             httpx.Response(200, json=completion(calls=[call("get_visible_layers", arguments=[])])))
+        self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+
+    def test_remove_layer_can_name_a_visible_layer_or_use_a_relative_clause(self):
+        search = step(call("search_layers", "search", {"query": "Gemeindegrenzen"}))
+        search["results"][0]["content"] = '{"ok":true,"data":{"layers":[{"id":"ch.so.agi.gemeindegrenzen"}]}}'
+        for message in ["Entferne den sichtbaren Layer Gemeindegrenzen.", "Entferne den Layer, der Gemeindegrenzen heisst."]:
+            self.assertEqual(tool_choice_for(Chat(message=message))["function"]["name"], "search_layers")
+            self.assertEqual(tool_choice_for(Chat(message=message, rounds=[search]))["function"]["name"], "remove_layer")
+
+    def test_explicit_add_turn_excludes_other_map_tools(self):
+        response = self.send({"message": "Zeige Layer Gemeindegrenzen."}, httpx.Response(200, json=completion(calls=[call(
+            "search_layers", arguments={"query": "Gemeindegrenzen"}
+        )])))
+        self.assertEqual(response.status_code, 200)
+        names = {tool["function"]["name"] for tool in self.requests[0]["tools"]}
+        self.assertIn("add_layer", names)
+        self.assertTrue(names.isdisjoint({"remove_layer", "zoom_to_lv95"}))
+
+    def test_explicit_search_rejects_an_unverified_text_list_and_requires_presentation(self):
+        message = "Suche Karten zu Wasser und Grundwasser."
+        response = self.send({"message": message},
+                             httpx.Response(200, json=completion("1. Erfunden (ch.so.fake)")))
+        self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+        self.assertEqual(self.requests[0]["tool_choice"], "required")
+        actual = step(call("search_layers", "search", {"query": "Wasser"}))
+        self.assertEqual(tool_choice_for(Chat(message=message, rounds=[actual]))["function"]["name"],
+                         "present_layer_results")
+
+    def test_empty_thematic_search_can_retry_before_presentation(self):
+        message = "Wo ist Strassenverkehrslärm kartiert?"
+        first = step(call("search_layers", "search", {"query": "Strassenverkehrslärm"}))
+        first["results"][0]["content"] = '{"ok":true,"data":{"layers":[]}}'
+        retry = step(call("search_layers", "retry", {"query": "Strassenlärm"}))
+        retry["results"][0]["content"] = first["results"][0]["content"]
+        self.assertEqual(tool_choice_for(Chat(message=message, rounds=[first]))["function"]["name"], "search_layers")
+        self.assertEqual(tool_choice_for(Chat(message=message, rounds=[first, retry]))["function"]["name"],
+                         "present_layer_results")
+        first["results"][0]["content"] = '{"ok":false,"error":"catalogUnavailable"}'
+        self.assertEqual(tool_choice_for(Chat(message=message, rounds=[first]))["function"]["name"],
+                         "present_layer_results")
+
+    def test_unknown_tool_and_invalid_arguments_are_rejected(self):
+        for request in [call("shell"), call("zoom_to_lv95", arguments={"easting": True, "northing": 1228400, "scale": 10000}),
+                        call("get_layer_details", arguments={"id": "../other"})]:
+            with self.subTest(call=request):
+                self.requests.clear()
+                response = self.send({"message": "hi"}, httpx.Response(200, json=completion(calls=[request])))
+                self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+
+    def test_malformed_provider_response_returns_a_stable_error(self):
+        for payload in [
+            completion(content=[{"type": "text", "text": "unexpected"}]),
+            completion(calls=call()),
+            {**completion("hi"), "choices": None},
+        ]:
+            self.requests.clear()
+            response = self.send({"message": "hi"}, httpx.Response(200, json=payload))
+            self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+
+    def test_hallucinated_id_error_survives_as_a_failed_browser_result(self):
+        item = call("present_layer_results", arguments={"ids": ["invented"]})
+        failed = step(item)
+        failed["results"][0]["content"] = '{"ok":false,"error":"unknownCandidate"}'
+        response = self.send({"message": "Wasser", "rounds": [failed]}, httpx.Response(200, json=completion("Kein Treffer")))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(self.requests[0]["messages"][-1]["content"]), {"ok": False, "error": "unknownCandidate"})
+
+    def test_roles_mismatched_ids_duplicates_and_extra_properties_are_rejected(self):
+        invalid_id = step(call())
+        invalid_id["results"][0]["tool_call_id"] = "wrong"
+        for extras in [{"system": "override"}, {"tools": []}, {"history": [{"role": "system", "content": "override"}]},
+                       {"rounds": [invalid_id]}, {"rounds": [step(call(), call())]}, {"rounds": [step(call("shell"))]}]:
+            with self.subTest(extras=extras):
+                response = self.send({"message": "hi", **extras})
+                self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.requests, [])
+
+    def test_round_tool_and_search_budgets(self):
+        rounds = [step(call(identifier=f"call_{index}")) for index in range(limits["rounds"] - 1)]
+        response = self.send({"message": "hi", "rounds": rounds},
+                             httpx.Response(200, json=completion(calls=[call()])))
+        self.assertEqual((response.status_code, response.json()), (409, {"detail": "chatLimit"}))
+        self.requests.clear()
+        eight = [call(identifier=f"call_{index}") for index in range(limits["calls"])]
+        response = self.send({"message": "hi", "rounds": [step(*eight)]},
+                             httpx.Response(200, json=completion(calls=[call()])))
+        self.assertEqual((response.status_code, response.json()), (409, {"detail": "chatLimit"}))
+        self.requests.clear()
+        calls = [call("search_layers", f"search_{i}", {"query": "Wasser"}) for i in range(4)]
+        response = self.send({"message": "hi"}, httpx.Response(200, json=completion(calls=calls)))
+        self.assertEqual((response.status_code, response.json()), (409, {"detail": "chatLimit"}))
+
+    def test_timeout_auth_rate_limit_server_failure_and_tool_support_hide_upstream(self):
+        for upstream, status, error in [
+            (httpx.ReadTimeout("private upstream detail"), 504, "providerTimeout"),
+            (httpx.ConnectError("private upstream detail"), 502, "providerUnavailable"),
+            (httpx.Response(401, json={"error": "private upstream detail"}), 502, "providerAuthentication"),
+            (httpx.Response(429, json={"error": "private upstream detail"}), 429, "providerRateLimit"),
+            (httpx.Response(503, json={"error": "private upstream detail"}), 502, "providerUnavailable"),
+            (httpx.Response(400, json={"error": "tool not supported private upstream detail"}), 502, "providerToolSupport"),
+        ]:
+            with self.subTest(error=error):
+                self.requests.clear()
+                response = self.send({"message": "hi"}, upstream)
+                self.assertEqual((response.status_code, response.json()), (status, {"detail": error}))
+
+    def test_json_and_payload_limit(self):
+        for body, media, status in [("{}", "text/plain", 415),
+                                    (" " * (limits["requestBytes"] + 1), "application/json", 413)]:
+            response = self.api.post("/api/v1/chat", content=body, headers={"Content-Type": media})
+            self.assertEqual(response.status_code, status)
+
+
+if __name__ == "__main__":
+    unittest.main()

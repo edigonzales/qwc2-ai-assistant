@@ -1,0 +1,9 @@
+{
+  "name": "qwc2-ai-assistant",
+  "private": true,
+  "scripts": {
+    "setup": "npm --prefix frontend ci",
+    "dev": "node scripts/dev.cjs",
+    "test": "npm --prefix frontend run test:remote"
+  }
+}
