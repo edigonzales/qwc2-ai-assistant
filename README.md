@@ -6,12 +6,12 @@ Suchdienste von geo.so.ch. QWC2 stammt aus dem
 und verwendet dessen unveränderte Version `qwc2-lts@2026.0.30`. Die BSD-Lizenz
 steht in [frontend/LICENSE](frontend/LICENSE).
 
-Der unveränderte [Quarkus-Kartenkatalog](https://github.com/edigonzales/kartenkatalog)
-lädt den unvollständigen XTF-Entwicklungsstand aus `data/`. Der Kartenclient
-erreicht die API unter `/catalog-api/v1/ebenen`. Der FastAPI-Dienst vermittelt
-Chat und Function Calling über die OpenAI-kompatible Infomaniak-API.
-QWC2 führt die Kartenaktionen im Browser aus. Der Chatverlauf lebt im
-Browser und wird beim Neuladen verworfen.
+FastAPI vermittelt den Chat an die OpenAI-kompatible Infomaniak-API und
+fragt die Solothurner Suche, `weblayers` und den Data Service ab. Der
+Browser ruft die Geo-Werkzeuge über `/assistant-api/v1/geo` auf. QWC2
+führt Kartenaktionen aus und lädt Legenden und Objektinformationen über
+seine gewohnten Dienste. Der Chatverlauf lebt im Browser und wird beim
+Neuladen verworfen.
 
 ## Lokal starten
 
@@ -27,8 +27,8 @@ npm run setup
 npm run dev
 ```
 
-`npm run dev` startet Quarkus und FastAPI in Compose und QWC2 mit Hot Reload
-auf dem Host. Strg+C beendet den Host-Prozess.
+`npm run dev` startet FastAPI in Compose und QWC2 mit Hot Reload auf dem
+Host. Strg+C beendet den Host-Prozess.
 
 Für den vollständigen Containerbetrieb den Host-Prozess beenden und
 `docker compose up --build` starten. `docker compose down` entfernt die
@@ -37,12 +37,11 @@ Container dieses Projekts.
 [Karte öffnen](http://127.0.0.1:8082/map/) ·
 [Gemeindegrenzen laden](http://127.0.0.1:8082/map/?l=ch.so.agi.gemeindegrenzen)
 
-Die Dienste verwenden Loopback-Ports. Bei Portkonflikten `QWC_PORT`,
-`ASSISTANT_PORT` oder `CATALOG_PORT` in der lokalen `.env` anpassen
-(Standard 8082, 8083 und 8084). Verwende dann auch in der Karten-URL und
-bei den Prüfbefehlen die angepassten Ports.
+Die Dienste verwenden Loopback-Ports. Bei Portkonflikten `QWC_PORT` oder
+`ASSISTANT_PORT` in der lokalen `.env` anpassen (Standard 8082 und 8083).
+Verwende dann auch bei den Prüfbefehlen die angepassten Ports.
 
-Karte, Katalog und Tests funktionieren mit leeren Infomaniak-Werten. Für
+Karte, Geo-Endpunkt und Tests funktionieren mit leeren Infomaniak-Werten. Für
 den Live-Chat `INFOMANIAK_API_TOKEN`, `INFOMANIAK_PRODUCT_ID` und
 `INFOMANIAK_MODEL` in der gitignorierten `.env` setzen. Compose übergibt
 diese Werte an FastAPI. Das Modell muss auf dem gewählten Produkt
@@ -58,6 +57,7 @@ Beispiele für Anfragen:
 
 - «Wo ist meine Karte zentriert und welche thematischen Layer sind sichtbar?»
 - «Suche Karten zu Wasser und Grundwasser im Kanton Solothurn.»
+- «In welchem Gewässerschutzbereich liegt Klosterplatz 1 in Solothurn?»
 - «Mehr Informationen zu Nummer 2.»
 - «Zeige Nummer 2 auf der Karte.»
 - «Entferne den Layer Gemeindegrenzen.»
@@ -71,7 +71,7 @@ erkannten Auftrag passende Kartenwerkzeug frei. Die Beispielsätze zeigen
 die unterstützten Formen.
 
 Pro Nachricht sind vier Modellrunden und acht Tool-Aufrufe möglich.
-Davon sind höchstens drei kurze Lucene-Abfragen mit je bis zu 20 Treffern
+Davon sind höchstens drei kantonale Kartenabfragen mit je bis zu 20 Kandidaten
 zulässig. Das Modell sortiert bis zu 40 eindeutige Kandidaten und kann bis zu
 zehn davon anzeigen. Der Browser prüft die IDs gegen die aktuellen Treffer.
 [Suchmessung mit zehn Fachfragen](docs/search-quality.md)
@@ -80,15 +80,16 @@ zehn davon anzeigen. Der Browser prüft die IDs gegen die aktuellen Treffer.
 
 - Die Chat-Seitenleiste rendert Nachrichten, Treffer und Direktaktionen. [AIChatPlugin.jsx](frontend/js/plugins/AIChatPlugin.jsx)
 - Browser und FastAPI lesen die Tool-Schemas und Grenzen aus derselben Datei. [tools.json](shared/tools.json)
-- Host- und Containerbetrieb nutzen dieselben Proxy-Routen für Live-Karte, Katalog und Chat. [remote.cjs](frontend/server/remote.cjs)
-- FastAPI validiert Chatnachrichten und vermittelt Modellaufrufe an Infomaniak. [app.py](assistant/app.py)
+- Host- und Containerbetrieb nutzen dieselben Proxy-Routen für Live-Karte, Geo-Werkzeuge und Chat. [remote.cjs](frontend/server/remote.cjs)
+- FastAPI validiert Toolargumente, liest die kantonalen Dienste und vermittelt Modellaufrufe an Infomaniak. [app.py](assistant/app.py)
 
 ## Prüfen
 
 ```sh
 npm test
-curl -fsS 'http://127.0.0.1:8082/catalog-api/v1/ebenen?q=wasser&sort=relevance'
-curl -fsS 'http://127.0.0.1:8082/catalog-api/v1/ebenen/ch.so.agi.gemeindegrenzen'
+curl -fsS http://127.0.0.1:8082/assistant-api/v1/geo \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"search_layers","args":{"query":"Grundwasser"}}'
 curl -fsS 'http://127.0.0.1:8083/healthz'
 docker compose exec -T assistant env -u INFOMANIAK_API_TOKEN -u INFOMANIAK_PRODUCT_ID -u INFOMANIAK_MODEL python - < assistant/test_chat.py
 ```
@@ -98,14 +99,16 @@ docker compose exec -T assistant env -u INFOMANIAK_API_TOKEN -u INFOMANIAK_PRODU
 1. Öffne die Karte mit konfiguriertem Infomaniak-Zugang und wähle
    **Karte & Werkzeuge → KI-Assistent**.
 2. Sende «Suche Karten zu Wasser und Grundwasser im Kanton Solothurn.»
-   Der Chat zeigt eine nummerierte Liste mit bis zu zehn Katalogtreffern.
+   Der Chat zeigt eine nummerierte Liste mit bis zu zehn Kartentreffern.
 3. Klicke bei einem noch nicht sichtbaren Treffer auf **Details**. Unter
-   dem Treffer erscheint die Katalog-ID. Klicke dort auf **Anzeigen**.
+   dem Treffer erscheint die Layer-ID. Klicke dort auf **Anzeigen**.
    Unter **Kartenebenen und Legende** erscheint der Layer als aktiv.
    Bei Gruppen können dort die aktiven Unterlayer erscheinen.
 4. Öffne den KI-Assistenten erneut und sende «Entferne Nummer 2», wobei
    du die Nummer des angezeigten Treffers verwendest. Der Chat bestätigt
    die Entfernung und der Layer verschwindet aus Karte und Ebenenbaum.
+5. Frage «In welchem Gewässerschutzbereich liegt Klosterplatz 1 in Solothurn?».
+   Die Antwort nennt den am aufgelösten Punkt abgefragten Bereich `Au`.
 
 ## Grenzen
 
@@ -114,6 +117,7 @@ Themes, Kartenbilder und WMTS, Suche, Layerdefinitionen, Feature-Information
 und Legenden. Für öffentlichen Betrieb wären Authentifizierung, Missbrauchs-
 und Kostenlimits sowie Berechtigungsprüfungen erforderlich.
 
-Der Entwicklungs-Harvest ist unvollständig. Die Treffer hängen von den
-vorhandenen Metadaten und den Suchbegriffen ab. Einzelne Layerdefinitionen
-oder Fremddienste können ausfallen. [Reale Prüfungen und Reviewstand](docs/review.md)
+Die Fachabfrage unterstützt Adressen und LV95-Punkte für direkt abfragbare
+Data-Service-Datensätze. Grundstücksflächen und amtliche ÖREB-Auszüge sind
+weitere Anwendungsfälle. Die Kartensuche hängt von den publizierten Metadaten
+und Suchbegriffen ab. [Reale Prüfungen und Reviewstand](docs/review.md)

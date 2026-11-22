@@ -69,7 +69,10 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(self.requests[0]["messages"][0]["role"], "system")
         self.assertEqual(self.requests[0]["messages"][1], {"role": "user", "content": "Guten Tag"})
         self.assertFalse(self.requests[0]["stream"])
-        self.assertEqual(len(self.requests[0]["tools"]), 5)
+        self.assertEqual({entry["function"]["name"] for entry in self.requests[0]["tools"]}, {
+            "get_map_state", "get_visible_layers", "search_layers", "get_layer_details",
+            "resolve_location", "query_features", "present_layer_results"
+        })
 
     def test_one_or_multiple_calls_and_continuation_preserve_order_and_ids(self):
         calls = [call(), call("get_visible_layers", "call_l")]
@@ -111,6 +114,46 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(tool_choice_for(details), {"type": "function", "function": {"name": "get_layer_details"}})
         for message in ["Zeige Nummer 1 nicht auf der Karte", "Entferne Nummer 1 aus der Trefferliste"]:
             self.assertEqual(tool_choice_for(Chat(message=message, last_results=references)), "auto")
+
+    def test_factual_search_and_parcel_number_are_not_layer_followups(self):
+        references = [{"id": "water.one", "title": "Fluss"}]
+        for message in ["Suche den Gewässerschutzbereich am Klosterplatz 1 in Solothurn.",
+                        "Gib mir Informationen zum Grundstück Nr. 101 in Solothurn."]:
+            self.assertEqual(tool_choice_for(Chat(message=message, last_results=references)), "auto")
+
+    def test_geo_address_matches_the_exact_house_number(self):
+        def hit(number):
+            return {"feature": {
+                "display": f"Klosterplatz {number}, 4500 Solothurn (Adresse)",
+                "dataproduct_id": "ch.so.agi.av.gebaeudeadressen.gebaeudeeingaenge",
+                "bbox": [2607600, 1228517, 2607600, 1228517], "srid": "EPSG:2056"
+            }}
+
+        with patch("app.get_geo", return_value={"results": [hit(11), hit(1)]}):
+            response = self.api.post("/api/v1/geo", json={"name": "resolve_location",
+                                                         "args": {"address": "Klosterplatz 1, Solothurn"}})
+        self.assertEqual((response.status_code, response.json()), (200, {
+            "status": "resolved", "candidates": [{"label": "Klosterplatz 1, 4500 Solothurn (Adresse)",
+                                                   "easting": 2607600, "northing": 1228517}]
+        }))
+
+    def test_geo_endpoint_rejects_map_mutations_and_reports_dataset_failure(self):
+        payload = {"name": "query_features", "args": {"dataset_id": "ch.so.test", "easting": 2607600,
+                                                      "northing": 1228517}}
+        for status, response_body in [(404, {}), (200, {"type": "FeatureCollection", "numberMatched": 0,
+                                                        "features": []})]:
+            upstream = httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda request: httpx.Response(status, json=response_body)))
+            with patch("app.httpx.AsyncClient", return_value=upstream):
+                response = self.api.post("/api/v1/geo", json=payload)
+            self.assertEqual(response.status_code, status)
+            if status == 404:
+                self.assertEqual(response.json(), {"detail": "datasetUnavailable"})
+            else:
+                self.assertEqual(response.json()["features"], [])
+                self.assertFalse(response.json()["partial"])
+        response = self.api.post("/api/v1/geo", json={"name": "add_layer", "args": {"id": "ch.so.test"}})
+        self.assertEqual((response.status_code, response.json()), (400, {"detail": "invalidTool"}))
 
     def test_named_layer_requires_search_then_corresponding_map_tool(self):
         message = "Entferne den Layer Gemeindegrenzen."

@@ -39,7 +39,7 @@ test('allowlist blocks writes and authentication', () => {
     for (const [route, method] of [['/api/data/v1/x', 'POST'], ['/auth/info', 'GET'], ['/ows/somap?request=Transaction', 'GET'], ['/ows/somap?REQUEST=GetMap&request=Transaction', 'GET'], ['/api/dataproduct/v1/private', 'GET']]) assert.equal(allowed(new URL(route, 'https://localhost'), method), false);
 });
 async function request(t, fetchImpl, route, options = {}, timeout = 10000) {
-    const server = http.createServer(createRemoteMiddleware({fetchImpl, timeout, catalogOrigin: 'http://127.0.0.1:19083'}));
+    const server = http.createServer(createRemoteMiddleware({fetchImpl, timeout, assistantOrigin: 'http://127.0.0.1:19083'}));
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     t.after(() => server.close());
     return fetch(`http://127.0.0.1:${server.address().port}${route}`, options);
@@ -75,80 +75,35 @@ test('root redirect keeps query and targets local app', async t => {
     assert.equal(res.status, 302);
     assert.equal(res.headers.get('location'), '/map/?l=example');
 });
-test('local catalog requests reach only the configured API without cookies', async t => {
-    const res = await request(t, async (url, options) => {
-        assert.equal(url, 'http://127.0.0.1:19083/api/v1/ebenen?q=wasser+%26+grundwasser&sort=relevance');
-        assert.equal(options.headers.Authorization, undefined);
-        assert.equal(options.headers.Cookie, undefined);
-        return Response.json([{id: "test"}]);
-    }, '/catalog-api/v1/ebenen?q=wasser%20%26%20grundwasser&sort=relevance', {headers: {Cookie: 'secret', Authorization: 'Bearer fake'}});
-    assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), [{id: "test"}]);
-});
-test('catalog proxy denies other routes and writes', async t => {
-    for (const [route, method] of [['/catalog-api/v1/ebenen', 'POST'], ['/catalog-api/v1/catalog', 'GET'], ['/catalog-api/actuator/env', 'GET'], ['/catalog-api/v1/ebenen/a%2Fb', 'GET'], ['/catalog-api/v1/ebenen/a/b', 'GET']]) {
-        const res = await request(t, () => { throw new Error('must not forward'); }, route, {method});
-        assert.equal(res.status, 403);
-    }
-});
-test('unreachable catalog API gives 502 without production fallback', async t => {
-    const res = await request(t, async url => {
-        assert.equal(url, 'http://127.0.0.1:19083/api/v1/ebenen');
-        throw new Error('connection refused');
-    }, '/catalog-api/v1/ebenen');
-    assert.equal(res.status, 502);
-    assert.match(await res.text(), /connection refused/);
-});
-
-test('catalog detail HEAD and missing ID keep their real status', async t => {
-    const head = await request(t, async (url, options) => {
-        assert.equal(url, 'http://127.0.0.1:19083/api/v1/ebenen/ch.so.agi.gemeindegrenzen');
-        assert.equal(options.method, 'HEAD');
-        return new Response(null);
-    }, '/catalog-api/v1/ebenen/ch.so.agi.gemeindegrenzen', {method: 'HEAD'});
-    assert.equal(head.status, 200);
-    assert.equal(await head.text(), '');
-    const absent = await request(t, async () => new Response(null, {status: 404}), '/catalog-api/v1/ebenen/absent');
-    assert.equal(absent.status, 404);
-});
-
-test('catalog detail accepts an encoded colon in a valid ID', async t => {
-    const response = await request(t, async url => {
-        assert.equal(url, 'http://127.0.0.1:19083/api/v1/ebenen/wms:layer');
-        return Response.json({id: 'wms:layer'});
-    }, '/catalog-api/v1/ebenen/wms%3Alayer');
-    assert.deepEqual(await response.json(), {id: 'wms:layer'});
-});
-
-test('catalog rejects unsupported and overlong queries before fetching', async t => {
-    for (const query of ['?q=a&q=b', '?q=' + 'a'.repeat(161), '?other=x', '?sort=title']) {
-        const res = await request(t, () => { throw new Error('must not forward'); }, '/catalog-api/v1/ebenen' + query);
-        assert.equal(res.status, 400);
+test('the fixed chat and geo POSTs reach FastAPI as JSON without credentials', async t => {
+    for (const [route, payload, status, result] of [
+        ['chat', {message: 'Hello'}, 429, {detail: 'providerRateLimit'}],
+        ['geo', {name: 'search_layers', args: {query: 'Wasser'}}, 200, {layers: []}]
+    ]) {
+        const body = JSON.stringify(payload);
+        const response = await request(t, async (target, options) => {
+            assert.equal(target, 'http://127.0.0.1:19083/api/v1/' + route);
+            assert.equal(options.method, 'POST');
+            assert.equal(options.body.toString(), body);
+            assert.equal(options.redirect, 'error');
+            assert.deepEqual(options.headers, {'Content-Type': 'application/json', Accept: 'application/json'});
+            return Response.json(result, {status});
+        }, '/assistant-api/v1/' + route, {
+            method: 'POST', body, headers: {'Content-Type': 'application/json', Authorization: 'Bearer fake', Cookie: 'fake'}
+        });
+        assert.equal(response.status, status);
+        assert.deepEqual(await response.json(), result);
     }
 });
 
-test('only the exact chat POST reaches FastAPI, with JSON and without credentials', async t => {
-    const body = JSON.stringify({message: 'Hello'});
-    const response = await request(t, async (target, options) => {
-        assert.equal(target, 'http://127.0.0.1:8083/api/v1/chat');
-        assert.equal(options.method, 'POST');
-        assert.equal(options.body.toString(), body);
-        assert.deepEqual(options.headers, {'Content-Type': 'application/json', Accept: 'application/json'});
-        return Response.json({detail: 'providerRateLimit'}, {status: 429});
-    }, '/assistant-api/v1/chat', {
-        method: 'POST', body, headers: {'Content-Type': 'application/json', Authorization: 'Bearer fake', Cookie: 'fake'}
-    });
-    assert.equal(response.status, 429);
-    assert.deepEqual(await response.json(), {detail: 'providerRateLimit'});
-});
-
-test('chat rejects another origin, method, URL, or media type before any upstream', async t => {
+test('the assistant rejects another origin, method, URL, or media type before any upstream', async t => {
     const path = '/assistant-api/v1/chat';
     const json = {'Content-Type': 'application/json'};
     for (const [route, options, status] of [
         [path, {}, 403],
         [path, {method: 'POST', headers: {...json, Origin: 'https://elsewhere.test'}}, 403],
         [path + '?extra=1', {method: 'POST', headers: json}, 403],
+        ['/assistant-api/v1/geo?extra=1', {method: 'POST', headers: json}, 403],
         ['/assistant-api/v1/other', {method: 'POST', headers: json}, 403],
         [path, {method: 'POST', headers: {'Content-Type': 'text/plain'}, body: '{}'}, 415],
         [path, {method: 'POST', headers: json, body: ' '.repeat(131073)}, 413]

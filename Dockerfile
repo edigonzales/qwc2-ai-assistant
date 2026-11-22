@@ -12,7 +12,7 @@ RUN npm run build:remote
 
 FROM node:22-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
 LABEL org.opencontainers.image.licenses="MIT AND BSD-2-Clause"
-ENV NODE_ENV=production PORT=8080 CATALOG_API_ORIGIN=http://kartenkatalog:8080
+ENV NODE_ENV=production PORT=8080
 WORKDIR /app
 COPY --from=build --chown=node:node /build/prod/ ./prod/
 COPY --chown=node:node frontend/server/server.cjs frontend/server/remote.cjs ./server/

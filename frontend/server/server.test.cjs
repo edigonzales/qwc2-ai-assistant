@@ -13,7 +13,7 @@ async function fixture(t, fetchImpl = async () => { throw new Error('unexpected 
     for (const [name, body] of Object.entries({'index.html': '<html>local</html>', 'config.json': '{}', 'app.js': 'local()', 'assets/img/logo.svg': '<svg/>', '.secret': 'secret'})) await fs.writeFile(path.join(root, name), body);
     await fs.writeFile(path.join(dir, 'outside'), 'secret');
     await fs.symlink(path.join(dir, 'outside'), path.join(root, 'escape'));
-    const server = createServer({staticRoot: root, fetchImpl, catalogOrigin: 'http://catalog:8080'});
+    const server = createServer({staticRoot: root, fetchImpl, assistantOrigin: 'http://assistant:8080'});
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     t.after(async () => { await new Promise(resolve => server.close(resolve)); await fs.rm(dir, {recursive: true}); });
     return async (route, method = 'GET', headers, chunks = []) => new Promise((resolve, reject) => {
@@ -45,17 +45,14 @@ test('denies traversal, dotfiles, symlinks, malformed paths and writes before up
     assert.equal((await request('/map/escape')).status, 403);
     assert.equal((await request('/map/app.js', 'POST')).status, 403);
     assert.equal((await request('/auth/login')).status, 403);
-    assert.equal((await request('/catalog-api/v1/ebenen', 'POST')).status, 403);
 });
-test('shares live adapter and catalog proxy with development mode', async t => {
+test('shares the live configuration adapter with development mode', async t => {
     const request = await fixture(t, async url => {
-        if (url === 'http://catalog:8080/api/v1/ebenen') return Response.json([]);
         assert.equal(url, 'https://geo.so.ch/map/config.json?lang=de-CH');
         return Response.json({plugins: {desktop: [{name: 'Editing'}]}});
     });
     const config = JSON.parse((await request('/map/%63onfig.json?lang=de-CH&tenant=other')).body);
     assert.deepEqual(config.plugins.desktop, [{name: 'AIChat'}]);
-    assert.equal((await request('/catalog-api/v1/ebenen')).status, 200);
 });
 test('encoded live config has no local fallback if upstream is down', async t => {
     const request = await fixture(t);
@@ -66,29 +63,30 @@ test('encoded live config has no local fallback if upstream is down', async t =>
 test('readiness depends on real backend health, assets survive backend outage', async t => {
     let up = false;
     const request = await fixture(t, async url => {
-        assert.equal(url, 'http://catalog:8080/q/health/ready');
+        assert.equal(url, 'http://assistant:8080/healthz');
         return Response.json({status: up ? 'UP' : 'DOWN'});
     });
     assert.equal((await request('/healthz')).status, 503);
     assert.equal((await request('/map/')).status, 200);
     up = true; assert.equal((await request('/healthz')).status, 200);
 });
-test('backend connection failures produce 503 health and 502 catalog without fallback', async t => {
+test('backend connection failures produce 503 health and 502 geo without fallback', async t => {
     const request = await fixture(t);
     assert.equal((await request('/healthz')).status, 503);
-    assert.equal((await request('/catalog-api/v1/ebenen')).status, 502);
+    assert.equal((await request('/assistant-api/v1/geo', 'POST', {'Content-Type': 'application/json'}, ['{}'])).status, 502);
 });
 
-test('production accepts the exact chat POST and bounds chunked bodies', async t => {
+test('production accepts the exact geo POST and bounds chunked bodies', async t => {
+    const body = ['{"name":"search_layers",', '"args":{"query":"Wasser"}}'];
     const request = await fixture(t, async (target, options) => {
-        assert.equal(target, 'http://127.0.0.1:8083/api/v1/chat');
-        assert.equal(options.body.toString(), '{"message":"Hallo"}');
-        return Response.json({assistant: {role: 'assistant', content: 'Hallo'}});
+        assert.equal(target, 'http://assistant:8080/api/v1/geo');
+        assert.equal(options.body.toString(), body.join(''));
+        return Response.json({layers: []});
     });
     const headers = {'Content-Type': 'application/json'};
-    const response = await request('/assistant-api/v1/chat', 'POST', headers, ['{"message":', '"Hallo"}']);
+    const response = await request('/assistant-api/v1/geo', 'POST', headers, body);
     assert.equal(response.status, 200);
-    assert.equal(JSON.parse(response.body).assistant.content, 'Hallo');
-    assert.equal((await request('/assistant-api/v1/chat', 'POST', headers, [' '.repeat(70000), ' '.repeat(70000)])).status, 413);
-    assert.equal((await request('/assistant-api/v1/%63hat', 'POST', headers, ['{}'])).status, 403);
+    assert.deepEqual(JSON.parse(response.body), {layers: []});
+    assert.equal((await request('/assistant-api/v1/geo', 'POST', headers, [' '.repeat(70000), ' '.repeat(70000)])).status, 413);
+    assert.equal((await request('/assistant-api/v1/%67eo', 'POST', headers, ['{}'])).status, 403);
 });

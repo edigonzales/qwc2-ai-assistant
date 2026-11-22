@@ -14,12 +14,14 @@ Layer-Suche über bestehende Solothurner Dienste. Keine eigene GIS-Fachlogik.
 - Öffentliche Karten-/Konfigurationsdienste von `https://geo.so.ch` wie im
   Referenzprojekt verwenden. Remote-Proxy nur für freigegebene Leseoperationen;
   Cookies und Authorization nicht an Solothurner Dienste weiterreichen.
-- Quarkus-Kartenkatalog (`edigonzales/kartenkatalog`) bleibt der einzige
-  Metadaten- und Suchdienst: `/api/v1/ebenen?q=...&sort=relevance`,
-  `/api/v1/ebenen/{id}`. Keine zweite Katalogdatenhaltung oder Suchindex.
-- Python/FastAPI ist ausschliesslich schlanker LLM-Orchestrator. Die LLM-API
-  wird von Infomaniak bezogen. Browser-Aktionen führt nur QWC2 aus;
-  browserseitige Katalog-Tools lesen nur über Same-Origin-Routen.
+- FastAPI vermittelt das Modell von Infomaniak und führt fachliche Leseaufrufe
+  an den Solothurner Such- und Data Service aus. Der Browser ruft diese Tools
+  über einen festen Same-Origin-Endpunkt auf. Kartenaktionen führt QWC2 aus.
+- Die kantonale Suche liefert Karten- und Ortstreffer, `weblayers` liefert die
+  darstellbaren QWC2-Layer. Gruppen zeigen ihre Unterlayer, Fassaden bleiben
+  eine Kartenebene. Fachabfragen verwenden konkrete, vom Data Service
+  bestätigte Datensatz-IDs. Keine eigene Katalogdatenhaltung, geratenen IDs
+  oder Ableitungen aus Darstellungsmerkmalen.
 - Toolnamen und Schemas sind fest und allowlisted. KI-Ausgaben sowie
   Metadaten sind nicht vertrauenswürdig. Toolargumente validieren, Ergebnisse
   nur anhand echter API-Daten/Redux-Zustände bestätigen.
@@ -42,9 +44,9 @@ Lizenzhinweise beibehalten. Nur notwendige Test- und Build-Skripte übernehmen.
    [qwc2-integration](.agents/skills/qwc2-integration/SKILL.md) anwenden.
 3. Vor jedem Phase-Commit
    [simplify-change](.agents/skills/simplify-change/SKILL.md) anwenden.
-4. Relevante Unit-, API-, Compose- und Browser-Tests wirklich ausführen.
-   Mock-Tests ersetzen weder den echten Quarkus-Katalog noch eine echte
-   QWC2-Kartenaktion. Ungeprüftes ausdrücklich als ungeprüft deklarieren.
+4. Die kleinste aussagekräftige Menge bestehender Tests nutzen und den
+   betroffenen Ablauf mit den echten Diensten und QWC2 prüfen. Zusätzliche
+   Tests brauchen einen konkreten Fehlerfall. Ungeprüftes ausdrücklich benennen.
 5. Den festgehaltenen Commit in einer unabhängigen OpenCode-2.x-Sitzung mit
    DeepSeek API und Modell `deepseek-flash` unter Anwendung von
    [review-change](.agents/skills/review-change/SKILL.md) prüfen.
