@@ -115,11 +115,39 @@ class ChatTests(unittest.TestCase):
         for message in ["Zeige Nummer 1 nicht auf der Karte", "Entferne Nummer 1 aus der Trefferliste"]:
             self.assertEqual(tool_choice_for(Chat(message=message, last_results=references)), "auto")
 
-    def test_factual_search_and_parcel_number_are_not_layer_followups(self):
+    def test_address_questions_require_resolving_and_querying_the_point(self):
         references = [{"id": "water.one", "title": "Fluss"}]
-        for message in ["Suche den Gewässerschutzbereich am Klosterplatz 1 in Solothurn.",
-                        "Gib mir Informationen zum Grundstück Nr. 101 in Solothurn."]:
-            self.assertEqual(tool_choice_for(Chat(message=message, last_results=references)), "auto")
+        parcel = Chat(message="Gib mir Informationen zum Grundstück Nr. 101 in Solothurn.", last_results=references)
+        self.assertEqual(tool_choice_for(parcel), "auto")
+        message = "In welchem Gewässerschutzbereich liegt Klosterplatz 1 in Solothurn?"
+        plain_reply = httpx.Response(200, json=completion("Au"))
+        response = self.send({"message": message}, plain_reply)
+        self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+        self.assertEqual(self.requests[0]["tool_choice"], "required")
+
+        lookups = [call("resolve_location", "location", {"address": "Klosterplatz 1 in Solothurn"}),
+                   call("search_layers", "layer", {"query": "Gewässerschutzbereiche"})]
+        self.requests.clear()
+        response = self.send({"message": "Suche den Gewässerschutzbereich am Klosterplatz 1 in Solothurn."},
+                             httpx.Response(200, json=completion(calls=lookups)))
+        self.assertEqual(response.json()["assistant"]["tool_calls"], lookups)
+
+        lookup_round = step(*lookups)
+        location = {"status": "resolved", "candidates": [{"easting": 2607600, "northing": 1228517}]}
+        layers = {"layers": [{"id": "ch.so.afu.gewaesserschutz.bereiche"}]}
+        for result, data in zip(lookup_round["results"], [location, layers]):
+            result["content"] = json.dumps({"ok": True, "data": data})
+        payload = {"message": message, "rounds": [lookup_round]}
+        self.requests.clear()
+        response = self.send(payload, plain_reply)
+        self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+        self.assertEqual(self.requests[0]["tool_choice"]["function"]["name"], "query_features")
+        for easting, status in [(2607601, 502), (2607600, 200)]:
+            self.requests.clear()
+            query = call("query_features", "query", {"dataset_id": layers["layers"][0]["id"],
+                                                      "easting": easting, "northing": 1228517})
+            response = self.send(payload, httpx.Response(200, json=completion(calls=[query])))
+            self.assertEqual(response.status_code, status)
 
     def test_geo_address_matches_the_exact_house_number(self):
         def hit(number):
@@ -129,9 +157,10 @@ class ChatTests(unittest.TestCase):
                 "bbox": [2607600, 1228517, 2607600, 1228517], "srid": "EPSG:2056"
             }}
 
-        with patch("app.get_geo", return_value={"results": [hit(11), hit(1)]}):
+        with patch("app.get_geo", return_value={"results": [hit(11), hit(1)]}) as search:
             response = self.api.post("/api/v1/geo", json={"name": "resolve_location",
-                                                         "args": {"address": "Klosterplatz 1, Solothurn"}})
+                                                         "args": {"address": "Klosterplatz 1 in Solothurn"}})
+        self.assertEqual(search.call_args.args[1]["searchtext"], "klosterplatz 1 solothurn")
         self.assertEqual((response.status_code, response.json()), (200, {
             "status": "resolved", "candidates": [{"label": "Klosterplatz 1, 4500 Solothurn (Adresse)",
                                                    "easting": 2607600, "northing": 1228517}]
@@ -248,14 +277,19 @@ class ChatTests(unittest.TestCase):
         self.assertTrue(names.isdisjoint({"remove_layer", "zoom_to_lv95"}))
 
     def test_explicit_search_rejects_an_unverified_text_list_and_requires_presentation(self):
-        message = "Suche Karten zu Wasser und Grundwasser."
-        response = self.send({"message": message},
-                             httpx.Response(200, json=completion("1. Erfunden (ch.so.fake)")))
-        self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
-        self.assertEqual(self.requests[0]["tool_choice"], "required")
-        actual = step(call("search_layers", "search", {"query": "Wasser"}))
-        self.assertEqual(tool_choice_for(Chat(message=message, rounds=[actual]))["function"]["name"],
-                         "present_layer_results")
+        for message, query in [
+            ("Suche Karten zu Wasser und Grundwasser.", "Wasser"),
+            ("Suche digitale Terrainmodelle auf Basis von LiDAR-Aufnahmen.", "LiDAR"),
+            ("Suche die landwirtschaftlichen Fruchtfolgeflächen.", "Fruchtfolgeflächen"),
+        ]:
+            self.requests.clear()
+            response = self.send({"message": message},
+                                 httpx.Response(200, json=completion("1. Erfunden (ch.so.fake)")))
+            self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+            self.assertEqual(self.requests[0]["tool_choice"], "required")
+            actual = step(call("search_layers", "search", {"query": query}))
+            self.assertEqual(tool_choice_for(Chat(message=message, rounds=[actual]))["function"]["name"],
+                             "present_layer_results")
 
     def test_empty_thematic_search_can_retry_before_presentation(self):
         message = "Wo ist Strassenverkehrslärm kartiert?"

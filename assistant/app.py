@@ -33,6 +33,11 @@ layer_name = re.compile(
     r"(?!(?:auf|von|in|im|on|from|an|are|sind|die|der|das|that|which|visibility|sichtbarkeit|zu|zum|zur|über|about|mit|with)\b)\w)"
 )
 layer_relative_name = re.compile(r"\b(?:layer|ebene)\s*,\s*(?:der|die)\s+\S.*\s+(?:heisst|heißt)[.!?]?$")
+map_words = re.compile(r"\b(?:karten?|maps?|layer|layers|ebenen?)\b")
+street_address = re.compile(
+    r"\b(?:am|an der|beim|liegt|at)\s+(?!grundst(?:ü|ue)ck\b|parzelle\b)"
+    r"(?:[^\W\d_][\w.'’/-]*\s+){1,6}\d{1,3}[a-z]?\b"
+)
 system_prompt = """You are the assistant for the Solothurn QWC2 map. Reply in the user's language and use plain text.
 Use the supplied tools to read the actual map or change it only as explicitly requested.
 Never invent map state, map entries, dataset IDs, tool execution or success. Use real map IDs
@@ -209,20 +214,46 @@ def map_command(message):
     return None
 
 
+def tool_results(chat, name):
+    return [json.loads(result.content) for step in chat.rounds
+            for call, result in zip(step.calls, step.results) if call.function.name == name]
+
+
+def address_question(message):
+    return bool(street_address.search(message) and not map_words.search(message))
+
+
+def resolved_point(chat):
+    resolutions = tool_results(chat, "resolve_location")
+    location = resolutions[-1].get("data") if resolutions else None
+    if isinstance(location, dict) and location.get("status") == "resolved":
+        candidates = location.get("candidates")
+        if isinstance(candidates, list) and len(candidates) == 1 and isinstance(candidates[0], dict):
+            return candidates[0].get("easting"), candidates[0].get("northing")
+    return None
+
+
 def tool_choice_for(chat, message, mutation):
-    layer_words = r"\b(?:karten?|maps?|layer|layers|ebenen?)\b"
+    prior_calls = {call.function.name for step in chat.rounds for call in step.calls}
+    search_outcomes = tool_results(chat, "search_layers")
+    if address_question(message):
+        if not chat.rounds:
+            return "required"
+        if resolved_point(chat) is not None and "query_features" not in prior_calls:
+            if not search_outcomes:
+                return {"type": "function", "function": {"name": "search_layers"}}
+            if any(isinstance(result.get("data"), dict) and result["data"].get("layers")
+                   for result in search_outcomes):
+                return {"type": "function", "function": {"name": "query_features"}}
+        return "auto"
     search_request = (
-        (re.match(r"^(?:such(?:e)?|find(?:e)?|search)\b(?!\s+(?:nicht|not)\b)", message)
-         and re.search(layer_words, message))
+        re.match(r"^(?:such(?:e)?|find(?:e)?|search)\b(?!\s+(?:nicht|not)\b)", message)
         or re.match(r"^(?:zeig(?:e)?|show)\s+(?:(?:mir|me)\s+)?(?:(?:die|the)\s+)?"
                     r"(?:layer|layers|ebenen|karten|maps)\s+(?:zu|zum|zur|über|about)\b", message)
         or (re.match(r"^(?:welche|which)\b", message) and re.search(r"\b(?:karten|maps)\b", message)
             and not re.search(r"\b(?:sichtbar|visible|geladen|eingeblendet)\b", message))
         or re.search(r"\bkartiert\b", message)
     )
-    prior_calls = {call.function.name for step in chat.rounds for call in step.calls}
-    search_outcomes = [json.loads(result.content) for step in chat.rounds
-                       for call, result in zip(step.calls, step.results) if call.function.name == "search_layers"]
     if search_request:
         if not chat.rounds:
             return "required"
@@ -284,7 +315,7 @@ def health():
 geo_origin = "https://geo.so.ch"
 search_path = "/api/search/v2/fts/"
 address_layer = "ch.so.agi.av.gebaeudeadressen.gebaeudeeingaenge"
-address_parts = re.compile(r"(.+?)\s+(\d+[a-z]?)(?:\s+(?:(\d{4})(?:\s+|$))?(.*))?", re.IGNORECASE)
+address_parts = re.compile(r"(.+?)\s+(\d+[a-z]?)(?:\s+(?:in\s+)?(?:(\d{4})(?:\s+|$))?(.*))?", re.IGNORECASE)
 links = re.compile(r"(?:https?://|attachment://|www\.)\S+", re.IGNORECASE)
 
 
@@ -376,7 +407,8 @@ async def resolve_location(address):
     requested = address_fields(address)
     if requested is None:
         raise HTTPException(400, "invalidLocation")
-    data = await get_geo(search_path, {"searchtext": address.strip(), "filter": address_layer, "limit": 10},
+    searchtext = " ".join(part for part in requested if part)
+    data = await get_geo(search_path, {"searchtext": searchtext, "filter": address_layer, "limit": 10},
                          "locationUnavailable", "invalidLocation")
     if not isinstance(data.get("results"), list):
         raise HTTPException(502, "invalidLocation")
@@ -518,8 +550,14 @@ async def chat(request: Request):
             raise ValueError("map tool not requested")
         if tool_choice != "auto" and not calls:
             raise ValueError("required tool call missing")
-        if tool_choice == "required" and any(call.function.name != "search_layers" for call in calls):
-            raise ValueError("unexpected search tool")
+        factual_address = address_question(phrase)
+        if tool_choice == "required":
+            names = {call.function.name for call in calls}
+            if factual_address:
+                if "resolve_location" not in names or not names <= {"resolve_location", "search_layers"}:
+                    raise ValueError("address must be resolved first")
+            elif names != {"search_layers"}:
+                raise ValueError("unexpected search tool")
         if isinstance(tool_choice, dict):
             name = tool_choice["function"]["name"]
             if any(call.function.name != name for call in calls):
@@ -532,6 +570,12 @@ async def chat(request: Request):
                     raise ValueError("invalid read tool arguments")
                 call.function.arguments = "{}"
         searches += check_calls(calls, used_ids)
+        if factual_address:
+            for call in calls:
+                if call.function.name == "query_features":
+                    args = json.loads(call.function.arguments)
+                    if (args["easting"], args["northing"]) != resolved_point(payload):
+                        raise ValueError("query uses an unverified point")
         if calls and (len(payload.rounds) + 1 >= limits["rounds"] or len(used_ids) > limits["calls"]
                       or searches > limits["searches"]):
             raise HTTPException(409, "chatLimit")

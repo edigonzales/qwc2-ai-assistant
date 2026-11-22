@@ -112,10 +112,10 @@ docker compose exec -T assistant env -u INFOMANIAK_API_TOKEN -u INFOMANIAK_PRODU
 
 ## Grenzen
 
-Die öffentliche Live-Anbindung beschränkt sich auf Kartenkonfiguration und
-Themes, Kartenbilder und WMTS, Suche, Layerdefinitionen, Feature-Information
-und Legenden. Für öffentlichen Betrieb wären Authentifizierung, Missbrauchs-
-und Kostenlimits sowie Berechtigungsprüfungen erforderlich.
+Die App liest öffentliche Kartenkonfigurationen, Kartenbilder und WMTS,
+Suchtreffer, Layerdefinitionen, Objektinformationen, Legenden und Daten.
+Für öffentlichen Betrieb wären Authentifizierung, Missbrauchs- und
+Kostenlimits sowie Berechtigungsprüfungen erforderlich.
 
 Die Fachabfrage unterstützt Adressen und LV95-Punkte für direkt abfragbare
 Data-Service-Datensätze. Grundstücksflächen und amtliche ÖREB-Auszüge sind
