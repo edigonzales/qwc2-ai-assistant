@@ -43,11 +43,11 @@ sequenceDiagram
     participant Geo as Solothurner Suche
 
     Nutzer->>Browser: Suche Karten zu Wasser und Grundwasser
-    loop Modellrunden bis zur Textantwort
+    loop Modellrunden bis zur Trefferliste
         Browser->>Proxy: POST /assistant-api/v1/chat<br/>Verlauf und bisherige Tool-Ergebnisse
         Proxy->>API: POST /api/v1/chat
         API->>LLM: Nachrichten, Tools und tool_choice
-        LLM-->>API: Tool-Aufrufe oder Antworttext
+        LLM-->>API: Tool-Aufrufe
         API-->>Proxy: Validierte Modellantwort
         Proxy-->>Browser: Validierte Modellantwort
         alt search_layers
@@ -58,9 +58,8 @@ sequenceDiagram
             API-->>Proxy: Kompakte Treffer
             Proxy-->>Browser: Kompakte Treffer
         else present_layer_results
-            Browser->>Browser: IDs prüfen und nummerierte Liste vorbereiten
-        else Antworttext
-            Browser-->>Nutzer: Chatantwort und Trefferliste anzeigen
+            Browser->>Browser: IDs prüfen
+            Browser-->>Nutzer: Nummerierte Trefferliste und Trefferzahl anzeigen
         end
     end
 ```
@@ -126,6 +125,9 @@ Pro Nachricht sind vier Modellrunden und acht Tool-Aufrufe möglich.
 Davon sind höchstens drei kantonale Kartenabfragen mit je bis zu 20 Kandidaten
 zulässig. Das Modell sortiert bis zu 40 eindeutige Kandidaten und kann bis zu
 zehn davon anzeigen. Der Browser prüft die IDs gegen die aktuellen Treffer.
+Bei einer reinen Kartensuche endet der Zug mit der erfolgreichen Präsentation
+der Liste. Eine Suchwiederholung bei leeren Treffern kann eine zusätzliche
+Modellrunde erfordern.
 [Suchmessung mit zehn Fachfragen](docs/search-quality.md)
 
 ## Einstiegspunkte im Code

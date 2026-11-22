@@ -126,6 +126,10 @@
             "ids": {
               "type": "array", "maxItems": 10,
               "items": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$"}
+            },
+            "search_only": {
+              "type": "boolean",
+              "description": "Set true only when the user only wants to find maps and the list completes the request. The UI can then end the turn after showing it. Leave false or omit for requests that need further tools or explanation."
             }
           }
         }

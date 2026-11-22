@@ -81,3 +81,23 @@ Geo-Vorschauen auf stdout. Ein von Infomaniak abgelehnter Modellaufruf
 lieferte im Browser und in den Logs denselben Fehlercode und dieselbe
 Kennung. Beide Mermaid-Diagramme wurden mit draw.io gerendert, und die
 relativen README-Links wurden geprüft.
+
+## Abschluss reiner Kartensuchen
+
+Basis `a677bd054a828974eac1443d147d9867beb82369`, geprüft
+`0859bc8d1b9b875ea4bdfa7c3d23f28b0a7eb7bc`. **PASS** mit OpenCode 2.0.28
+und `deepseek/deepseek-flash`. Der Review prüfte die Aufrufgrenzen und die
+Validierung und führte 16 Node-Tests aus. Fehlt die vom Modell gesetzte
+Abschlussmarkierung, läuft der Zug weiter. Der Review lief ohne Live-Dienste.
+
+Im lokalen QWC2-Browser mit FastAPI in Compose lieferte «Suche Karten zu
+Wasser und Grundwasser im Kanton Solothurn.» zehn Treffer. Die Browser- und
+stdout-Logs zeigten für `41a5b307-da84-4926-8a5f-86b919caa76c` zwei
+Infomaniak-Aufrufe. Runde 1 suchte nach beiden Themen, Runde 2 präsentierte
+die validierten Treffer mit `search_only: true`.
+
+Lokal bestanden 41 Node- und 28 Python-Tests, gezieltes ESLint und
+`git diff --check`. Der gezielte Browsercode-Test deckt die erfolgreiche
+Präsentation, die Fortsetzung ohne Abschlussmarkierung und eine abgelehnte
+Treffer-ID ab. Die letzten beiden Fälle wurden mit vorgegebenen
+Modellantworten geprüft.

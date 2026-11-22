@@ -15,6 +15,8 @@ function valid(value, schema) {
             new RegExp(schema.pattern, 'u').test(value);
     case 'number':
         return Number.isFinite(value) && value >= schema.minimum && value <= schema.maximum;
+    case 'boolean':
+        return typeof value === 'boolean';
     case 'array':
         return Array.isArray(value) && value.length <= schema.maxItems && value.every(item => valid(item, schema.items));
     default:
