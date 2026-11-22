@@ -38,19 +38,20 @@ export function numberedLayer(results, number) {
     return Number.isInteger(number) && number > 0 ? results[number - 1] ?? null : null;
 }
 
-export function createTurnTools({map, fetchImpl = fetch, signal, onResults = () => {}}) {
+export function createTurnTools({map, fetchImpl = fetch, signal, diagnostics, onResults = () => {}}) {
     const candidates = new Map();
     let calls = 0;
     let searches = 0;
 
-    async function readGeo(name, args) {
+    async function readGeo(name, args, round) {
         const timeout = AbortSignal.timeout(17000);
+        const start = performance.now();
         let response;
         let data;
         try {
             response = await fetchImpl('/assistant-api/v1/geo', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', ...diagnostics?.headers(round)},
                 body: JSON.stringify({name, args}),
                 redirect: 'error',
                 signal: signal ? AbortSignal.any([signal, timeout]) : timeout
@@ -59,15 +60,17 @@ export function createTurnTools({map, fetchImpl = fetch, signal, onResults = () 
         } catch {
             signal?.throwIfAborted();
             throw new Error(response && !timeout.aborted ? 'invalidGeoResponse' : 'geoUnavailable');
+        } finally {
+            diagnostics?.record('geo.request', {round, tool: name, status: response?.status, duration_ms: performance.now() - start});
         }
         signal?.throwIfAborted();
         if (!response.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : 'geoUnavailable');
         return data;
     }
 
-    async function search(query) {
+    async function search(query, round) {
         if (++searches > limits.searches) throw new Error('searchLimit');
-        const {layers: rows} = await readGeo('search_layers', {query: query.trim()}) ?? {};
+        const {layers: rows} = await readGeo('search_layers', {query: query.trim()}, round) ?? {};
         if (!Array.isArray(rows)) throw new Error('invalidCatalog');
         const found = [];
         for (const row of rows.slice(0, limits.perSearch)) {
@@ -81,8 +84,8 @@ export function createTurnTools({map, fetchImpl = fetch, signal, onResults = () 
         return {layers: found};
     }
 
-    async function details(id) {
-        const row = await readGeo('get_layer_details', {id});
+    async function details(id, round) {
+        const row = await readGeo('get_layer_details', {id}, round);
         const layer = layerSummary(row, 1800);
         if (layer?.id !== id || !valid(row.qwcLayerName, idSchema)) throw new Error('invalidCatalog');
         return {...layer, qwcLayerName: row.qwcLayerName, type: text(row.type, 40)};
@@ -95,7 +98,7 @@ export function createTurnTools({map, fetchImpl = fetch, signal, onResults = () 
         return {ids: results.map(result => result.id)};
     }
 
-    return async function run(name, args) {
+    return async function run(name, args, round) {
         signal?.throwIfAborted();
         const schema = schemas.get(name);
         if (!schema || !valid(args, schema)) throw new Error('invalidTool');
@@ -103,13 +106,13 @@ export function createTurnTools({map, fetchImpl = fetch, signal, onResults = () 
         switch (name) {
         case 'get_map_state': return map.getState();
         case 'get_visible_layers': return map.getVisibleLayers();
-        case 'add_layer': return map.addLayer(await details(args.id), signal);
-        case 'remove_layer': return map.removeLayer(await details(args.id), signal);
+        case 'add_layer': return map.addLayer(await details(args.id, round), signal);
+        case 'remove_layer': return map.removeLayer(await details(args.id, round), signal);
         case 'zoom_to_lv95': return map.zoom(args);
-        case 'search_layers': return search(args.query);
-        case 'get_layer_details': return details(args.id);
+        case 'search_layers': return search(args.query, round);
+        case 'get_layer_details': return details(args.id, round);
         case 'resolve_location':
-        case 'query_features': return readGeo(name, args);
+        case 'query_features': return readGeo(name, args, round);
         case 'present_layer_results': return present(args.ids);
         default: throw new Error('invalidTool');
         }

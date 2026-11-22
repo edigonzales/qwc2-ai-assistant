@@ -90,9 +90,13 @@ async function proxyAssistant(req, res, origin, fetchImpl) {
             chunks.push(chunk);
         }
         req.setTimeout(0);
+        const headers = {'Content-Type': 'application/json', Accept: 'application/json'};
+        for (const name of ['x-ai-turn-id', 'x-ai-round', 'x-ai-debug']) {
+            if (typeof req.headers[name] === 'string') headers[name] = req.headers[name];
+        }
         const upstream = await fetchImpl(origin.replace(/\/$/, '') + route.path, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+            headers,
             body: Buffer.concat(chunks, length),
             signal: AbortSignal.any([controller.signal, AbortSignal.timeout(route.timeout)]),
             redirect: 'error'

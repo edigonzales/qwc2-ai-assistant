@@ -1,6 +1,8 @@
 import json
 import os
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from unittest.mock import patch
 
 import httpx2 as httpx
@@ -40,7 +42,7 @@ class ChatTests(unittest.TestCase):
         self.addCleanup(self.api.close)
         self.requests = []
 
-    def send(self, payload, *responses):
+    def send(self, payload, *responses, headers=None):
         def respond(req):
             self.assertEqual(req.url.path, "/chat/completions")
             self.requests.append(json.loads(req.content))
@@ -54,7 +56,45 @@ class ChatTests(unittest.TestCase):
                                http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))), "mock"
 
         with patch("app.infomaniak_client", side_effect=client):
-            return self.api.post("/api/v1/chat", json=payload)
+            return self.api.post("/api/v1/chat", json=payload, headers=headers)
+
+    def test_chat_debug_keeps_browser_and_stdout_payload_permissions_separate(self):
+        token = "test-infomaniak-secret"
+        turn = "4edc7d73-8ced-4735-8053-9e183caf7d16"
+        for debug, log_payload, browser_mode, browser_payload in [
+            ("0", "1", "content", False), ("1", "0", "content", True), ("1", "1", "meta", False),
+        ]:
+            self.requests.clear()
+            output = StringIO()
+            with patch.dict(os.environ, {"ASSISTANT_DEBUG": debug, "ASSISTANT_DEBUG_PAYLOAD": log_payload,
+                                        "INFOMANIAK_API_TOKEN": token}), redirect_stdout(output):
+                response = self.send({"message": f"Private fixture {token}"},
+                                     httpx.Response(200, json=completion("Hello.")),
+                                     headers={"X-AI-Debug": browser_mode, "X-AI-Turn-Id": turn, "X-AI-Round": "1"})
+            self.assertEqual(response.status_code, 200)
+            event = json.loads(output.getvalue())
+            self.assertEqual((event["turn_id"], event["round"], event["status"]), (turn, 1, 200))
+            self.assertEqual("provider" in event, debug == "1")
+            self.assertEqual("Private fixture" in output.getvalue(), debug == log_payload == "1")
+            self.assertEqual("debug" in response.json(), debug == "1")
+            self.assertEqual("Private fixture" in response.text, browser_payload)
+            self.assertNotIn(token, output.getvalue() + response.text)
+            if browser_payload:
+                preview = json.loads(response.json()["debug"]["payload"]["json"])
+                self.assertEqual(preview["messages"][-1]["content"], "Private fixture [redacted]")
+                self.assertEqual(preview["assistant"]["content"], "Hello.")
+
+    def test_failed_provider_call_keeps_diagnostics_and_stable_error(self):
+        output = StringIO()
+        with patch.dict(os.environ, {"ASSISTANT_DEBUG": "1", "ASSISTANT_DEBUG_PAYLOAD": "0"}), redirect_stdout(output):
+            response = self.send({"message": "Hello."}, httpx.Response(429, json={"error": {"message": "raw upstream body"}}),
+                                 headers={"X-AI-Debug": "meta", "X-AI-Turn-Id": "not-a-uuid"})
+        event = json.loads(output.getvalue())
+        self.assertEqual((response.status_code, response.json()["detail"]), (429, "providerRateLimit"))
+        self.assertEqual(event["provider"]["http_status"], 429)
+        self.assertEqual(event["error"], "providerRateLimit")
+        self.assertNotIn("turn_id", event)
+        self.assertNotIn("raw upstream body", output.getvalue() + response.text)
 
     def test_health_without_credentials_and_unconfigured_chat(self):
         with patch.dict(os.environ, {}, clear=True):

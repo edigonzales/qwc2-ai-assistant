@@ -13,6 +13,58 @@ führt Kartenaktionen aus und lädt Legenden und Objektinformationen über
 seine gewohnten Dienste. Der Chatverlauf lebt im Browser und wird beim
 Neuladen verworfen.
 
+## Architektur
+
+```mermaid
+flowchart TB
+    browser["Browser<br/>QWC2, Chat und Tool-Schleife"]
+    proxy["Same-Origin-Proxy<br/>QWC2-Webserver"]
+    assistant["FastAPI<br/>Chat und Geo-Werkzeuge"]
+    model["Infomaniak<br/>LLM-API"]
+    geo["geo.so.ch<br/>Solothurner Geodienste"]
+
+    browser -->|Chat und Geo-Werkzeuge| proxy
+    browser -->|Karte, Layerdefinitionen und Objektinfo| proxy
+    proxy -->|POST /api/v1/chat und /api/v1/geo| assistant
+    proxy -->|Lesende Kartendienste| geo
+    assistant -->|Chat Completions| model
+    assistant -->|Suche, weblayers und Data Service| geo
+```
+
+### Ablauf einer Wassersuche
+
+```mermaid
+sequenceDiagram
+    actor Nutzer
+    participant Browser as Browser / QWC2
+    participant Proxy as Same-Origin-Proxy
+    participant API as FastAPI
+    participant LLM as Infomaniak
+    participant Geo as Solothurner Suche
+
+    Nutzer->>Browser: Suche Karten zu Wasser und Grundwasser
+    loop Modellrunden bis zur Textantwort
+        Browser->>Proxy: POST /assistant-api/v1/chat<br/>Verlauf und bisherige Tool-Ergebnisse
+        Proxy->>API: POST /api/v1/chat
+        API->>LLM: Nachrichten, Tools und tool_choice
+        LLM-->>API: Tool-Aufrufe oder Antworttext
+        API-->>Proxy: Validierte Modellantwort
+        Proxy-->>Browser: Validierte Modellantwort
+        alt search_layers
+            Browser->>Proxy: POST /assistant-api/v1/geo
+            Proxy->>API: POST /api/v1/geo
+            API->>Geo: Thematische Kartensuche
+            Geo-->>API: Kandidaten
+            API-->>Proxy: Kompakte Treffer
+            Proxy-->>Browser: Kompakte Treffer
+        else present_layer_results
+            Browser->>Browser: IDs prüfen und nummerierte Liste vorbereiten
+        else Antworttext
+            Browser-->>Nutzer: Chatantwort und Trefferliste anzeigen
+        end
+    end
+```
+
 ## Lokal starten
 
 Voraussetzungen sind Docker Compose, Internetzugang und für den Host-Modus
@@ -109,6 +161,48 @@ docker compose exec -T assistant env -u INFOMANIAK_API_TOKEN -u INFOMANIAK_PRODU
    die Entfernung und der Layer verschwindet aus Karte und Ebenenbaum.
 5. Frage «In welchem Gewässerschutzbereich liegt Klosterplatz 1 in Solothurn?».
    Die Antwort nennt den am aufgelösten Punkt abgefragten Bereich `Au`.
+
+## Debugging
+
+Im Netzwerk-Tab siehst du die Aufrufe des Browsers an `/assistant-api/v1/chat`
+und `/assistant-api/v1/geo`. Der Modellaufruf an Infomaniak läuft in FastAPI.
+Für diesen Aufruf kann FastAPI der Chatantwort ein Diagnosefeld hinzufügen.
+
+Setze `ASSISTANT_DEBUG=1` in der lokalen `.env` und übernimm die Einstellung
+mit `docker compose up -d assistant`. Aktiviere dann im gewünschten Tab die
+Inhaltsansicht in der Browserkonsole und sende eine Frage.
+
+```js
+sessionStorage.setItem('qwc-ai-debug', 'content')
+```
+
+Aktiviere in der Konsole die Debug- oder Verbose-Ausgabe und filtere nach
+`[QWC KI]`. `chat.request` und `geo.request` zeigen die Browseraufrufe,
+`chat.backend` den Modellaufruf und `tool.result` sowie `chat.display` die
+Ausführung und Anzeige.
+Bei `content` enthält `chat.backend` die gesendeten Modellnachrichten und die
+sichtbare Modellantwort als Vorschau unter `payload.json`. Bei
+`payload.truncated: true` enthält das Feld nur den Anfang des JSON-Texts.
+Für Metadaten verwende `meta`.
+Mit `sessionStorage.removeItem('qwc-ai-debug')` schaltest du die Ausgabe aus.
+
+FastAPI schreibt pro Chat- und Geo-Aufruf eine JSON-Zeile auf `stdout`.
+Mit `ASSISTANT_DEBUG=1` enthält sie zusätzlich Provider- oder Geo-Diagnosen.
+`turn_id` und `round` verbinden den Eintrag mit der Browserkonsole. Direkte
+Trefferaktionen erhalten eine eigene `turn_id`. Scheitert der Aufruf schon
+im Browser oder Proxy, gibt es dazu keinen FastAPI-Eintrag.
+
+```sh
+docker compose logs --no-log-prefix --no-color -f assistant
+```
+
+`ASSISTANT_DEBUG_PAYLOAD=1` ergänzt bei aktivem Server-Debug auch auf `stdout`
+eine begrenzte Textvorschau. Dafür ist keine aktivierte Browserkonsole nötig.
+FastAPI schwärzt den konfigurierten Infomaniak-Token und lässt HTTP-Header
+weg. Die Vorschau kann Fragen, Verlauf, Adressen und im Chat eingegebene
+Zugangsdaten enthalten. Docker kann diese Inhalte speichern.
+Setze beide Variablen auf `0` und führe `docker compose up -d assistant` aus,
+um die zusätzlichen Server-Diagnosen abzuschalten.
 
 ## Grenzen
 

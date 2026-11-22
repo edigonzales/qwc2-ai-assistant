@@ -76,6 +76,7 @@ test('root redirect keeps query and targets local app', async t => {
     assert.equal(res.headers.get('location'), '/map/?l=example');
 });
 test('the fixed chat and geo POSTs reach FastAPI as JSON without credentials', async t => {
+    const trace = {'x-ai-turn-id': '4edc7d73-8ced-4735-8053-9e183caf7d16', 'x-ai-round': '1', 'x-ai-debug': 'content'};
     for (const [route, payload, status, result] of [
         ['chat', {message: 'Hello'}, 429, {detail: 'providerRateLimit'}],
         ['geo', {name: 'search_layers', args: {query: 'Wasser'}}, 200, {layers: []}]
@@ -86,10 +87,10 @@ test('the fixed chat and geo POSTs reach FastAPI as JSON without credentials', a
             assert.equal(options.method, 'POST');
             assert.equal(options.body.toString(), body);
             assert.equal(options.redirect, 'error');
-            assert.deepEqual(options.headers, {'Content-Type': 'application/json', Accept: 'application/json'});
+            assert.deepEqual(options.headers, {'Content-Type': 'application/json', Accept: 'application/json', ...trace});
             return Response.json(result, {status});
         }, '/assistant-api/v1/' + route, {
-            method: 'POST', body, headers: {'Content-Type': 'application/json', Authorization: 'Bearer fake', Cookie: 'fake'}
+            method: 'POST', body, headers: {'Content-Type': 'application/json', Authorization: 'Bearer fake', Cookie: 'fake', ...trace}
         });
         assert.equal(response.status, status);
         assert.deepEqual(await response.json(), result);
