@@ -4,15 +4,19 @@ import {test} from 'node:test';
 import {runConversation} from '../js/plugins/aichat/conversation.mjs';
 import {createTurnTools, limits} from '../js/plugins/aichat/tools.mjs';
 
-const call = (id, name, args = {}) => ({
-    id, type: 'function', function: {name, arguments: JSON.stringify(args)}
+const call = (id, name, args = {}, intent = 1) => ({
+    id, type: 'function', function: {name, arguments: JSON.stringify({intent, ...args})}
 });
-const reply = (content, ...toolCalls) => Response.json({assistant: {role: 'assistant', content, tool_calls: toolCalls}});
+const declare = (...intents) => ({
+    id: 'declare', type: 'function', function: {name: 'declare_intents', arguments: JSON.stringify({intents})}
+});
+const scope = (goal, target, extra = {}) => ({goal, target, ...extra});
+const reply = (content, ...toolCalls) => Response.json({assistant: {role: 'assistant', content, tool_calls: toolCalls}, pending: []});
 const previous = [{id: 'layer.one', title: 'Eins'}, {id: 'layer.two', title: 'Zwei'}];
 
 test('numbered follow-up correlates the exact result and rejects the wrong past ID', async() => {
     const steps = [
-        reply(null, call('call_1', 'add_layer', {id: 'layer.one'}), call('call_2', 'get_layer_details', {id: 'layer.two'}),
+        reply(null, declare(scope('get_layer_details', 'Ebene 2', {layer_result_number: 2})), call('call_1', 'add_layer', {id: 'layer.one'}), call('call_2', 'get_layer_details', {id: 'layer.two'}),
             call('call_3', 'search_layers', {query: 'Zwei'})),
         reply('Zwei')
     ];
@@ -28,7 +32,7 @@ test('numbered follow-up correlates the exact result and rejects the wrong past 
             const payload = JSON.parse(options.body);
             assert.deepEqual(payload.last_results, previous);
             if (steps.length === 1) {
-                assert.deepEqual(payload.rounds[0].results, [
+                assert.deepEqual(payload.rounds[0].results.slice(1), [
                     {tool_call_id: 'call_1', content: '{"ok":false,"error":"unknownCandidate"}'},
                     {tool_call_id: 'call_2', content: '{"ok":true,"data":{"title":"Zwei"}}'},
                     {tool_call_id: 'call_3', content: '{"ok":false,"error":"numberedSearch"}'}
@@ -37,8 +41,7 @@ test('numbered follow-up correlates the exact result and rejects the wrong past 
             return steps.shift();
         }
     });
-    assert.deepEqual(result, {assistant: 'Zwei', errors: ['unknownCandidate', 'numberedSearch']});
-    await assert.rejects(runConversation({message: 'Zeig Nummer 3', history: [], lastResults: previous}), {message: 'unknownResult'});
+    assert.deepEqual(result, {assistant: 'Zwei', errors: ['unknownCandidate', 'numberedSearch'], pending: []});
 });
 
 test('a parcel number reaches the chat with an existing layer result list', async() => {
@@ -53,10 +56,11 @@ test('a parcel number reaches the chat with an existing layer result list', asyn
     assert.equal(result.assistant, 'Welche Adresse gehört zum Grundstück?');
 });
 
-test('a searched ID may be used in the same response batch after its search', async() => {
+test('a searched ID may be used in its intent after the search', async() => {
     const executed = [];
     const steps = [
-        reply(null, call('a', 'search_layers', {query: 'Wasser'}), call('b', 'add_layer', {id: 'known'})),
+        reply(null, declare(scope('add_layer', 'Wasserlayer')), call('a', 'search_layers', {query: 'Wasser'})),
+        reply(null, call('b', 'add_layer', {id: 'known'})),
         reply('Layer angezeigt.')
     ];
     await runConversation({
@@ -74,7 +78,7 @@ test('only a successful search-only presentation ends the turn without another r
     const layer = {id: 'ch.so.wasser', title: 'Wasser'};
     for (const [searchOnly, id, requests] of [[true, layer.id, 2], [false, layer.id, 3], [true, 'invented', 3]]) {
         const steps = [
-            reply(null, call('search', 'search_layers', {query: 'Wasser'})),
+            reply(null, declare(scope('present_layer_results', 'Wasser')), call('search', 'search_layers', {query: 'Wasser'})),
             reply(null, call('list', 'present_layer_results', {ids: [id], search_only: searchOnly})),
             reply('Weitere Antwort')
         ];
@@ -95,7 +99,8 @@ test('only a successful search-only presentation ends the turn without another r
 
 test('a visible QWC name cannot substitute for a catalog ID', async() => {
     const steps = [
-        reply(null, call('v', 'get_visible_layers'), call('r', 'remove_layer', {id: 'qwc.alias'})),
+        reply(null, declare(scope('remove_layer', 'sichtbaren Layer')), call('v', 'get_visible_layers'),
+            call('r', 'remove_layer', {id: 'qwc.alias'})),
         reply(null, call('s', 'search_layers', {query: 'QWC-Titel'})),
         reply(null, call('c', 'remove_layer', {id: 'catalog.id'})),
         reply('Layer entfernt.')
@@ -107,7 +112,7 @@ test('a visible QWC name cannot substitute for a catalog ID', async() => {
         onAction: (name, data) => confirmations.push([name, data]),
         fetchImpl: (_url, options) => {
             if (steps.length === 3) {
-                assert.deepEqual(JSON.parse(options.body).rounds[0].results[1], {
+                assert.deepEqual(JSON.parse(options.body).rounds[0].results[2], {
                     tool_call_id: 'r', content: '{"ok":false,"error":"unknownCandidate"}'
                 });
             }
@@ -127,7 +132,8 @@ test('a visible QWC name cannot substitute for a catalog ID', async() => {
 
 test('a layer details 404 remains visible alongside a verified removal in the same batch', async() => {
     const steps = [
-        reply(null, call('a', 'remove_layer', {id: 'catalog.missing'}), call('b', 'remove_layer', {id: 'catalog.known'})),
+        reply(null, declare(scope('remove_layer', 'catalog.missing'), scope('remove_layer', 'catalog.known')),
+            call('a', 'remove_layer', {id: 'catalog.missing'}), call('b', 'remove_layer', {id: 'catalog.known'}, 2)),
         reply('Beide Layer entfernt.')
     ];
     const confirmations = [];
@@ -150,7 +156,9 @@ test('the browser stops before executing a fourth-round or excess batch', async(
     let executed = 0;
     await assert.rejects(runConversation({
         message: 'Kartenstatus', history: [], lastResults: [],
-        fetchImpl: () => reply(null, call('c' + ++requests, 'get_map_state')),
+        fetchImpl: () => ++requests === 1 ?
+            reply(null, declare(scope('get_map_state', 'Kartenstatus')), call('c1', 'get_map_state')) :
+            reply(null, call('c' + requests, 'get_map_state')),
         runTool: () => { ++executed; return {}; }
     }), {message: 'chatLimit'});
     assert.equal(requests, limits.rounds);

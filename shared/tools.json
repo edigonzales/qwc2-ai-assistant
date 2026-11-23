@@ -12,8 +12,7 @@
     "resultLength": 16000,
     "requestBytes": 131072
   },
-  "ordinalPattern": "\\b(?:nummer\\s*|number\\s*|nr\\.?\\s*|(?:layer|ebene)\\s+)([0-9]+)\\b",
-  "locationOrdinalPrefix": "\\b(?:grundstück|grundstueck|grundbuch|gb|parzelle|adresse|haus|parcel|plot|property|address|house)\\s*:?\\s*$",
+  "intentTool": "declare_intents",
   "tools": [
     {
       "type": "function",

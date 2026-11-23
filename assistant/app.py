@@ -25,33 +25,84 @@ limits = definition["limits"]
 schemas = {entry["function"]["name"]: entry["function"]["parameters"] for entry in tools}
 id_schema = schemas["get_layer_details"]["properties"]["id"]
 theme_search_config = (0.0, {})
-metadata_request = re.compile(
-    r"\b(?:informationen|information|infos|details|metadaten|metadata|beschreibung|description|legende|legend)\b",
-    re.IGNORECASE
-)
-map_mutations = {"add_layer", "remove_layer", "zoom_to_lv95", "zoom_to_result"}
 search_tools = {"search_layers", "search_objects"}
-result_number = re.compile(definition["ordinalPattern"])
-location_ordinal_prefix = re.compile(definition["locationOrdinalPrefix"], re.IGNORECASE)
-catalog_id = re.compile(r"\b(?:ch\.[a-z0-9_.:-]+|id\s+[a-z0-9_.:-]+)\b")
-layer_name = re.compile(
-    r"\b(?:layer|ebene)(?:\s*:\s*|\s+)(?:[«‹„“‚‘(\"']\w|(?:mit|with)\s+id\s+\w|"
-    r"(?!(?:auf|von|in|im|on|from|an|are|sind|die|der|das|that|which|visibility|sichtbarkeit|zu|zum|zur|über|about|mit|with)\b)\w)"
-)
-layer_relative_name = re.compile(r"\b(?:layer|ebene)\s*,\s*(?:der|die)\s+\S.*\s+(?:heisst|heißt)[.!?]?$")
-map_words = re.compile(r"\b(?:karten?|maps?|layer|layers|ebenen?)\b")
-street_address = re.compile(
-    r"\b(?:am|an der|beim|liegt|at)\s+(?!grundst(?:ü|ue)ck\b|parzelle\b)"
-    r"(?:[^\W\d_][\w.'’/-]*\s+){1,6}\d{1,3}[a-z]?\b"
-)
+# A goal names the terminal tool. The tuple lists tools that can supply its evidence.
+goal_tools = {
+    "present_layer_results": ("search_layers",),
+    "search_objects": (),
+    "zoom_to_result": ("search_objects",),
+    "zoom_to_lv95": (),
+    "add_layer": ("search_layers",),
+    "remove_layer": ("search_layers", "get_visible_layers"),
+    "get_layer_details": ("search_layers",),
+    "get_map_state": (),
+    "get_visible_layers": (),
+    "query_features": ("search_layers", "resolve_location"),
+}
+intent_tool = definition["intentTool"]
+intent_index = {"type": "integer", "minimum": 1, "maximum": limits["calls"]}
+intent_target = {"type": "string", "minLength": 1, "maxLength": 300, "pattern": r"\S"}
+intent_schema = {
+    "type": "object", "required": ["goal", "target"], "additionalProperties": False,
+    "properties": {
+        "goal": {"type": "string", "enum": list(goal_tools)},
+        "target": {**intent_target, "description": "Exact target words from the user's request."},
+        "layer_result_number": {"type": "integer", "minimum": 1, "maximum": 10,
+                   "description": "Only for a numbered layer from the latest layer results."},
+        "resume": {**intent_index, "description": "1-based pending intent number when answering its clarification."},
+    },
+}
+declaration = {
+    "type": "function", "function": {
+        "name": intent_tool,
+        "description": "Declare all GIS intents once before executing tools, ordered as requested. Use [] if no tool is needed.",
+        "parameters": {"type": "object", "required": ["intents"], "additionalProperties": False,
+                       "properties": {"intents": {"type": "array", "maxItems": limits["calls"], "items": intent_schema}}},
+    },
+}
+scoped_tools = [
+    {"type": "function", "function": {
+        **entry["function"], "parameters": {
+            **schema, "required": [*schema["required"], "intent"],
+            "properties": {**schema["properties"], "intent": {**intent_index, "description": "1-based declared intent number"}},
+        },
+    }}
+    for entry in tools
+    for schema in [entry["function"]["parameters"]]
+]
+chat_schemas = {item["function"]["name"]: item["function"]["parameters"] for item in [declaration, *scoped_tools]}
+
 system_prompt = """You are the assistant for the Solothurn QWC2 map. Reply in the user's language and use plain text.
 Use the supplied tools to read the actual map or change it only as explicitly requested.
+On the first round, call declare_intents once before any other tools. List each independent GIS
+request in user order, with its terminal goal and the exact relevant words from the user as target.
+Send independent prerequisite reads in the same batch. Every other tool takes the 1-based intent
+number. Use separate intents and evidence for unrelated goals. Understand requests by meaning,
+including indirect requests such as "Kannst du mich zum Grundstück bringen?".
+A search, factual question, negation, quoted command, or hypothetical request does not authorize a map change.
+Do not execute a conditional action while its prerequisite is unresolved.
+Choose an empty intents list for general help, out-of-scope or unclear requests that need a question
+before any tool. The intent number is its position in the array. Never put that position in the declaration.
+Omit layer_result_number unless the user actually refers to a position in the previous layer list.
+Omit resume unless the user is answering one of the pending questions.
+For example, for "Lade den Layer mit den Altlasten und gehe zu Grundstück 2084 in Solothurn":
+{"intents":[{"goal":"add_layer","target":"Altlasten"},{"goal":"zoom_to_result","target":"Grundstück 2084 in Solothurn"}]}.
+The two tool calls that follow use intent 1 and intent 2 respectively.
+If the user answers a pending question, set resume to that pending intent number and keep its goal.
+For "Brunnenthal" replying to a pending parcel zoom, declare {"goal":"zoom_to_result",
+"target":"Brunnenthal","resume":1}. Search again, combining the previous target and clarification.
+On unrelated requests declare new intents without resume. Never repeat completed intents.
+Execute independent, verified actions even if another intent needs clarification and ask a specific
+question about the unresolved intent in the final response. The UI confirms successful map actions.
+Do not repeat those confirmations if you have an outstanding question. For a combined layer-and-place request
+send search_layers and search_objects with their respective intent numbers in the first batch,
+then add_layer and zoom_to_result in the next batch when each has sufficient evidence.
 Never invent map state, map entries, dataset IDs, tool execution or success. Use real map IDs
 from search, the numbered result list, or an explicit user ID verified by a tool.
 Report tool errors and partial results honestly.
 For every new request about the current map, get fresh tool evidence. Earlier chat replies
 describe past state. For a show request, call add_layer even if that layer was shown earlier.
-Use exactly {} for get_map_state and get_visible_layers. They have no arguments.
+Use only the intent number for get_map_state and get_visible_layers.
 A group can be shown as a map layer. A facade appears as one layer. Neither is a Data Service
 dataset. Use get_layer_details for the map description. Drawing a layer and querying its data
 are independent.
@@ -67,8 +118,10 @@ If the user only wants to find maps, call present_layer_results on its own with 
 The UI displays the numbered list and verified count or suggests refining an empty search.
 No final text is needed for this case. If the request needs further tools or an explanation,
 leave search_only false and continue after presentation.
-For a factual question about an address, call resolve_location with the street, house number and
-locality. Search for the specific individual layer with search_layers in the same tool batch.
+For a factual question about an address there is ONE intent with goal query_features, e.g.
+{"intents":[{"goal":"query_features","target":"Gewässerschutzbereich Klosterplatz 1 in Solothurn"}]}.
+Use the same intent number for resolve_location and search_layers in the same batch, and later for
+query_features. Give resolve_location the street, house number and locality.
 Use the coordinates of the unique resolved address and the relevant individual layer's actual ID
 with query_features. Ask for clarification if the address is ambiguous. An unavailable dataset
 does not establish that no features exist. Do not publish a map result list for a data query.
@@ -91,7 +144,7 @@ Preserve the supplied name, number, place and district, and only use
 qualifiers from the user's request. Report counts as search-service counts, which may
 include similar hits. The UI presents selectable candidates. Use zoom_to_result only
 with the returned zoom_ref. If absent, refine using the user's terms or ask them to
-pick a visible result or repeat the navigation command with a qualifier. For ambiguous
+pick a visible result or supply a qualifier in a reply. For ambiguous
 parcels name the districts from the labels, e.g. «Gehe zu Grundstück 123 in Messen im
 Grundbuchkreis Brunnenthal», then search 123 Brunnenthal Messen.
 """
@@ -138,12 +191,18 @@ class Reference(Payload):
     title: str = Field(min_length=1, max_length=120)
 
 
+class PendingIntent(Payload):
+    goal: str
+    target: str = Field(min_length=1, max_length=300)
+
+
 class Chat(Payload):
     message: str = Field(min_length=1, max_length=limits["messageLength"])
     theme_id: str | None = Field(default=None, min_length=1, max_length=200)
     history: list[Turn] = Field(default_factory=list, max_length=limits["historyTurns"])
     rounds: list[Round] = Field(default_factory=list, max_length=limits["rounds"] - 1)
     last_results: list[Reference] = Field(default_factory=list, max_length=schemas["present_layer_results"]["properties"]["ids"]["maxItems"])
+    pending: list[PendingIntent] = Field(default_factory=list, max_length=limits["calls"])
 
 
 class GeoCall(Payload):
@@ -158,6 +217,8 @@ def valid(value, schema):
         return (isinstance(value, dict) and set(schema["required"]) <= value.keys()
                 and all(k in schema["properties"] and valid(v, schema["properties"][k]) for k, v in value.items()))
     if kind == "string":
+        if "enum" in schema:
+            return isinstance(value, str) and value in schema["enum"]
         if not isinstance(value, str) or not schema["minLength"] <= len(value) <= schema["maxLength"]:
             return False
         pattern = schema["pattern"]
@@ -165,6 +226,8 @@ def valid(value, schema):
     if kind == "number":
         return (type(value) in (int, float) and schema["minimum"] <= value <= schema["maximum"]
                 and math.isfinite(value))
+    if kind == "integer":
+        return type(value) is int and schema["minimum"] <= value <= schema["maximum"]
     if kind == "boolean":
         return isinstance(value, bool)
     if kind == "array":
@@ -172,13 +235,129 @@ def valid(value, schema):
     return False
 
 
-def check_calls(calls, used_ids):
+def check_calls(chat, calls, used_ids, intents, evidence):
+    args_for = []
     for call in calls:
-        schema = schemas.get(call.function.name)
-        if (call.id in used_ids or not schema or not valid(json.loads(call.function.arguments), schema)):
+        name = call.function.name
+        schema = chat_schemas.get(name)
+        args = json.loads(call.function.arguments)
+        if call.id in used_ids or not schema or not valid(args, schema):
             raise ValueError("invalid tool call")
         used_ids.add(call.id)
-    return sum(call.function.name in search_tools for call in calls)
+        args_for.append((name, args))
+    if intents is None:
+        if not args_for or args_for[0][0] != intent_tool:
+            raise ValueError("missing intent declaration")
+        intents = args_for.pop(0)[1]["intents"]
+        resumed = set()
+        for intent in intents:
+            allowed_words = object_words(chat.message).split()
+            target_words = set(object_words(intent["target"]).split())
+            if number := intent.get("layer_result_number"):
+                if intent["goal"] not in layer_id_tools or number > len(chat.last_results):
+                    raise ValueError("unknown layer result number")
+                row = chat.last_results[number - 1]
+                allowed_words += object_words(f"Nummer {number} {row.title} {row.id}").split()
+            if "resume" in intent:
+                index = intent["resume"]
+                if index > len(chat.pending) or index in resumed or intent["goal"] != chat.pending[index - 1].goal:
+                    raise ValueError("invalid resumed intent")
+                resumed.add(index)
+                prior = chat.pending[index - 1].target
+                prior_words = object_words(prior).split()
+                clarification = intent["target"]
+                if target_words <= set(prior_words) and len(intents) == 1:
+                    clarification = chat.message
+                if not set(prior_words) <= set(object_words(clarification).split()):
+                    combined = f"{prior} {clarification}"
+                    if len(combined) > 300:
+                        raise ValueError("resumed target is too long")
+                    intent["target"] = combined
+                allowed_words += prior_words
+            if intent["goal"] not in {"get_map_state", "get_visible_layers"} and not (
+                target_words <= set(allowed_words)
+            ):
+                raise ValueError("unsupported intent target")
+    completed = set()
+    for name, args in args_for:
+        if name == intent_tool or args["intent"] > len(intents):
+            raise ValueError("undeclared tool intent")
+        index = args["intent"]
+        intent = intents[index - 1]
+        goal = intent["goal"]
+        if name not in (goal, *goal_tools[goal]) or (intent.get("layer_result_number") and name == "search_layers"):
+            raise ValueError("tool does not match intent")
+        previous = evidence.get(index, {})
+        # Failed actions also finish their attempt. A new turn can explicitly retry them.
+        if goal not in search_tools and (goal in previous or index in completed):
+            raise ValueError("intent already attempted")
+        if name == goal and name not in search_tools:
+            completed.add(index)
+        check_evidence(chat, intent, name, args, previous)
+    return intents, sum(name in search_tools for name, _ in args_for)
+
+
+layer_id_tools = {"add_layer", "remove_layer", "get_layer_details"}
+
+
+def outcome(evidence, tool):
+    steps = evidence.get(tool, [])
+    data = steps[-1].get("data") if steps else None
+    return data if isinstance(data, dict) else {}
+
+
+def layer_ids(evidence):
+    return {layer["id"] for result in evidence.get("search_layers", [])
+            for layer in (result.get("data") or {}).get("layers", [])
+            if isinstance(layer, dict) and valid(layer.get("id"), id_schema)}
+
+
+def number_in_target(number, target):
+    normalized = re.sub(r"(?<=\d)['’\u202f\u00a0](?=\d)", "", target)
+    return any(float(value.replace(",", ".")) == number
+               for value in re.findall(r"\d+(?:[.,]\d+)?", normalized))
+
+
+def zoom_reference(intent, evidence):
+    search = outcome(evidence, "search_objects")
+    query, ref = search.get("query"), search.get("zoom_ref")
+    if (isinstance(query, str) and set(object_words(query).split()) <= set(object_words(intent["target"]).split())
+            and valid(ref, schemas["zoom_to_result"]["properties"]["result_ref"])):
+        return ref
+    return None
+
+
+def check_evidence(chat, intent, name, args, evidence):
+    target = intent["target"]
+    if name == "zoom_to_result" and args["result_ref"] != zoom_reference(intent, evidence):
+        raise ValueError("zoom uses an unverified object")
+    if name == "zoom_to_lv95" and not all(number_in_target(args[key], target) for key in ("easting", "northing", "scale")):
+        raise ValueError("zoom uses unspecified coordinates or scale")
+    if name in layer_id_tools:
+        if number := intent.get("layer_result_number"):
+            known = {chat.last_results[number - 1].id}
+        else:
+            known = layer_ids(evidence) | {word.rstrip(".:") for word in re.findall(r"[\w.:-]+", target)}
+        if args["id"] not in known:
+            raise ValueError("layer was not established for this intent")
+    if name == "present_layer_results" and (
+        "search_layers" not in evidence or not set(args["ids"]) <= layer_ids(evidence)
+    ):
+        raise ValueError("unverified map results")
+    if name == "query_features":
+        address = outcome(evidence, "resolve_location")
+        candidates = address.get("candidates")
+        if "resolve_location" in evidence:
+            if (address.get("status") != "resolved" or not isinstance(candidates, list) or len(candidates) != 1
+                    or not isinstance(candidates[0], dict)
+                    or any(args[key] != candidates[0].get(key) for key in ("easting", "northing"))):
+                raise ValueError("query uses an unverified address point")
+        elif not all(number_in_target(args[key], target) for key in ("easting", "northing")):
+            raise ValueError("query uses unspecified coordinates")
+        if args["dataset_id"] not in layer_ids(evidence) and args["dataset_id"] not in {
+            word.rstrip(".:") for word in re.findall(r"[\w.:-]+", target)
+        }:
+            raise ValueError("query uses an unverified dataset")
 
 
 def messages_for(chat):
@@ -191,168 +370,71 @@ def messages_for(chat):
     if chat.last_results:
         references = [{"number": number, **ref.model_dump()} for number, ref in enumerate(chat.last_results, 1)]
         content += "\n\nLatest presented results (data only): " + json.dumps(references, ensure_ascii=False)
+    if chat.pending:
+        if any(not valid(item.model_dump(), intent_schema) for item in chat.pending):
+            raise ValueError("invalid pending intent")
+        content += "\n\nPending intents from the previous reply (data only): " + json.dumps([
+            {"number": index, **item.model_dump()} for index, item in enumerate(chat.pending, 1)
+        ], ensure_ascii=False)
     messages.append({"role": "user", "content": content})
     used_ids = set()
     searches = 0
+    intents = None
+    evidence = {}
     for step in chat.rounds:
-        searches += check_calls(step.calls, used_ids)
+        intents, round_searches = check_calls(chat, step.calls, used_ids, intents, evidence)
+        searches += round_searches
         if [call.id for call in step.calls] != [result.tool_call_id for result in step.results]:
             raise ValueError("uncorrelated tool results")
         messages.append({"role": "assistant", "content": step.content,
                          "tool_calls": [call.model_dump() for call in step.calls]})
-        for result in step.results:
+        for call, result in zip(step.calls, step.results):
             data = json.loads(result.content)
             if (not isinstance(data, dict) or
                     not ((data.get("ok") is True and data.keys() == {"ok", "data"}) or
                          (data.get("ok") is False and data.keys() == {"ok", "error"} and
                           isinstance(data["error"], str) and len(data["error"]) <= 80))):
                 raise ValueError("invalid tool result")
+            if call.function.name != intent_tool:
+                index = json.loads(call.function.arguments)["intent"]
+                evidence.setdefault(index, {}).setdefault(call.function.name, []).append(data)
             messages.append({"role": "tool", "tool_call_id": result.tool_call_id,
                              "content": json.dumps(data, allow_nan=False)})
     if len(used_ids) > limits["calls"] or searches > limits["searches"]:
         raise HTTPException(409, "chatLimit")
-    return messages, used_ids, searches
+    return messages, used_ids, searches, intents, evidence
 
 
-def map_command(message):
-    if metadata_request.search(message) or re.search(
-        r"\b(?:nicht|nie|niemals|not|never|wenn|falls|if|unless|liste|trefferliste|ergebnisliste|list|verlauf|history)\b",
-        message
-    ):
-        return None
-    if (re.match(r"^(?:zentrier(?:e)?|zoom(?:e)?|center)\b", message) and "lv95" in message
-        and len(re.findall(r"\b[0-9]+", message)) >= 3 and re.search(r"massstab|maßstab|scale|1\s*:", message)):
-        return "zoom_to_lv95"
-    if re.match(r"^(?:(?:geh(?:e)?|spring(?:e)?)\s+zu(?:m|r)?|go\s+to|"
-                r"(?:zoom(?:e)?|zentrier(?:e)?(?:\s+die\s+karte)?|center(?:\s+the\s+map)?)"
-                r"\s+(?:auf|zu(?:m|r)?|to|on))\s+\S", message):
-        return "zoom_to_result"
-    numbered_command = re.fullmatch(definition["ordinalPattern"] + r"\s+(anzeigen|einblenden|entfernen|show|remove)[.!]?", message)
-    if numbered_command:
-        return "remove_layer" if numbered_command[2] in {"entfernen", "remove"} else "add_layer"
-    command = re.match(r"^(zeig(?:e)?|show|aktiviere|blende|enable|füge|add|entferne|remove)\s+"
-                       r"(?:(?:mir|me)\s+)?(?:(?:den|die|das|the)\s+)?", message)
-    if command:
-        target = message[command.end():]
-        remove = command[1] in {"entferne", "remove"}
-        if remove:
-            target = re.sub(r"^(?:sichtbaren?|eingeblendeten?|visible|loaded)\s+", "", target)
-            if layer_relative_name.fullmatch(target):
-                return "remove_layer"
-        if result_number.match(target) or catalog_id.match(target) or layer_name.match(target):
-            return "remove_layer" if remove else "add_layer"
-    return None
+def pending_intents(chat, intents, evidence):
+    pending = []
+    resumed = {intent["resume"] for intent in intents if "resume" in intent}
+    if resumed:
+        pending.extend(item.model_dump() for index, item in enumerate(chat.pending, 1) if index not in resumed)
+    for index, intent in enumerate(intents, 1):
+        goal = intent["goal"]
+        observed = evidence.get(index, {})
+        if goal in observed:
+            continue
+        if not observed or goal == "present_layer_results" and outcome(observed, "search_layers"):
+            raise ValueError("unfinished intent")
+        if goal == "zoom_to_result" and zoom_reference(intent, observed):
+            raise ValueError("verified zoom was not attempted")
+        if any(result.get("ok") for results in observed.values() for result in results):
+            pending.append({"goal": goal, "target": intent["target"], "source_intent": index})
+    return pending[:limits["calls"]]
 
 
-def tool_results(chat, name):
-    return [json.loads(result.content) for step in chat.rounds
-            for call, result in zip(step.calls, step.results) if call.function.name == name]
-
-
-def address_question(message):
-    return bool(street_address.search(message) and not map_words.search(message))
-
-
-def resolved_point(chat):
-    resolutions = tool_results(chat, "resolve_location")
-    location = resolutions[-1].get("data") if resolutions else None
-    if isinstance(location, dict) and location.get("status") == "resolved":
-        candidates = location.get("candidates")
-        if isinstance(candidates, list) and len(candidates) == 1 and isinstance(candidates[0], dict):
-            return candidates[0].get("easting"), candidates[0].get("northing")
-    return None
-
-
-def object_zoom_ref(chat):
-    matches = tool_results(chat, "search_objects")
-    if not matches or matches[-1]["ok"] is not True:
-        return None
-    result = matches[-1]["data"]
-    if not isinstance(result, dict) or not isinstance(result.get("query"), str):
-        return None
-    if not set(object_words(result["query"]).split()) <= set(object_words(chat.message).split()):
-        return None
-    ref = result.get("zoom_ref")
-    return ref if valid(ref, schemas["zoom_to_result"]["properties"]["result_ref"]) else None
-
-
-def search_command(message):
-    return bool(re.match(r"^(?:such(?:e)?|find(?:e)?|search)\b(?!\s+(?:nicht|not)\b)", message))
-
-
-def thematic_search(message):
-    return bool(
-        (search_command(message) and re.match(
-            r"^\w+\s+(?:(?:mir|me|nach|im|in|zum|zur|die|den|der|das|dem|ein(?:e|en|em|er)?|the|passende|thematische)\s+)*"
-            r"(?:karten?|maps?|layer|layers|ebenen?)\b", message))
-        or re.match(r"^(?:zeig(?:e)?|show)\s+(?:(?:mir|me)\s+)?(?:(?:die|the)\s+)?"
-                    r"(?:layer|layers|ebenen|karten|maps)\s+(?:zu|zum|zur|über|about)\b", message)
-        or (re.match(r"^(?:welche|which)\b", message) and re.search(r"\b(?:karten|maps)\b", message)
-            and not re.search(r"\b(?:sichtbar|visible|geladen|eingeblendet)\b", message))
-        or re.search(r"\bkartiert\b", message)
-    )
-
-
-def tool_choice_for(chat, message, mutation):
-    prior_calls = {call.function.name for step in chat.rounds for call in step.calls}
-    search_outcomes = tool_results(chat, "search_layers")
-    if mutation == "zoom_to_result":
-        if not chat.rounds:
-            return {"type": "function", "function": {"name": "search_objects"}}
-        if "zoom_to_result" not in prior_calls and object_zoom_ref(chat):
-            return {"type": "function", "function": {"name": "zoom_to_result"}}
-        return "auto"
-    if address_question(message):
-        if not chat.rounds:
-            return "required"
-        if resolved_point(chat) is not None and "query_features" not in prior_calls:
-            if not search_outcomes:
-                return {"type": "function", "function": {"name": "search_layers"}}
-            if any(isinstance(result.get("data"), dict) and result["data"].get("layers")
-                   for result in search_outcomes):
-                return {"type": "function", "function": {"name": "query_features"}}
-        return "auto"
-    if search_command(message) or thematic_search(message):
-        if not chat.rounds:
-            return "required"
-        if "search_objects" in prior_calls and "search_layers" not in prior_calls:
-            return "auto"
-        if (len(chat.rounds) == 1 and 0 < len(search_outcomes) < limits["searches"]
-                and all(outcome["ok"] and outcome.get("data") == {"layers": []} for outcome in search_outcomes)):
-            return {"type": "function", "function": {"name": "search_layers"}}
-        if "present_layer_results" not in prior_calls:
-            return {"type": "function", "function": {"name": "present_layer_results"}}
-        return "auto"
-    if not mutation and not metadata_request.search(message):
-        layer_overview = re.fullmatch(
-            r"(?:zeig(?:e)?|show)\s+(?:(?:mir|me)\s+)?(?:(?:die|the)\s+)?"
-            r"(?:layer|layers|ebenen)\s+(?:auf (?:der|meiner|dieser) karte|on (?:the|my) map)[.!?]?", message
-        )
-        if ("get_visible_layers" not in prior_calls and re.search(r"\b(?:layer|layers|ebenen?|karten|maps)\b", message)
-            and (layer_overview or re.search(r"\b(?:sichtbar\w*|eingeblendet\w*|geladen\w*|visible|loaded|enabled)\b", message))):
-            return {"type": "function", "function": {"name": "get_visible_layers"}}
-        if ("get_map_state" not in prior_calls and re.search(r"\b(?:karte|map)\b", message)
-            and re.search(r"\b(?:koordinatenreferenzsystem|koordinatensystem|crs|massstab|maßstab|scale|zentriert|centered)\b", message)):
-            return {"type": "function", "function": {"name": "get_map_state"}}
-    numbered = next((match for match in result_number.finditer(message)
-                     if not location_ordinal_prefix.search(message[:match.start()])), None)
-    if numbered and not chat.last_results:
-        return "auto"
-    name = mutation or ("get_layer_details" if metadata_request.search(message) else None)
-    if not name or name in prior_calls:
-        return "auto"
-    named = not numbered and (layer_name.search(message) or layer_relative_name.search(message))
-    if not chat.rounds:
-        if numbered or catalog_id.search(message) or name == "zoom_to_lv95":
-            return {"type": "function", "function": {"name": name}}
-        if named:
-            return {"type": "function", "function": {"name": "search_layers"}}
-    elif named:
-        for outcome in search_outcomes:
-            data = outcome.get("data")
-            if outcome["ok"] and isinstance(data, dict) and data.get("layers"):
-                return {"type": "function", "function": {"name": name}}
-    return "auto"
+def declaration_for(chat):
+    properties = dict(intent_schema["properties"])
+    if not chat.pending:
+        del properties["resume"]
+    if not chat.last_results:
+        del properties["layer_result_number"]
+    item = {**intent_schema, "properties": properties}
+    parameters = {**declaration["function"]["parameters"], "properties": {
+        "intents": {"type": "array", "maxItems": limits["calls"], "items": item}
+    }}
+    return {**declaration, "function": {**declaration["function"], "parameters": parameters}}
 
 
 def infomaniak_client():
@@ -731,32 +813,28 @@ async def chat(request: Request):
     body = await request_body(request)
     try:
         payload = Chat.model_validate_json(body)
-        messages, used_ids, searches = messages_for(payload)
-    except (ValueError, RecursionError) as exc:
+        messages, used_ids, searches, intents, evidence = messages_for(payload)
+    except (AttributeError, KeyError, TypeError, ValueError, RecursionError) as exc:
         raise HTTPException(400, "invalidConversation") from exc
 
-    phrase = re.sub(r"^(?:bitte|please)\s+", "", payload.message.strip().lower())
-    mutation = map_command(phrase)
-    factual_address = address_question(phrase)
-    layer_lookup = mutation is None and thematic_search(phrase)
-    tool_choice = tool_choice_for(payload, phrase, mutation)
-    blocked_tools = map_mutations - {mutation}
-    zoom_ref = object_zoom_ref(payload) if mutation == "zoom_to_result" else None
-    if not zoom_ref or tool_results(payload, "zoom_to_result"):
-        blocked_tools.add("zoom_to_result")
-    if mutation == "zoom_to_result" and not payload.theme_id:
-        raise HTTPException(503, "mapNotReady")
-    if payload.theme_id and (mutation == "zoom_to_result" or mutation is None and not layer_lookup and not factual_address):
+    tool_choice = "required" if intents is None else "auto"
+    if intents is None:
+        allowed = set(chat_schemas) - {intent_tool}
+    else:
+        allowed = {name for index, intent in enumerate(intents, 1)
+                   if intent["goal"] in search_tools or intent["goal"] not in evidence.get(index, {})
+                   for name in (intent["goal"], *goal_tools[intent["goal"]])}
+    available_tools = ([declaration_for(payload)] if intents is None else []) + [
+        tool for tool in scoped_tools if tool["function"]["name"] in allowed
+    ]
+    if payload.theme_id and "search_objects" in allowed:
         try:
             filters = await object_filters(payload.theme_id)
         except HTTPException:
             filters = []
         messages[0]["content"] += object_prompt + "\nConfigured object search filters (IDs): " + json.dumps(filters)
-        if not filters:
-            messages[0]["content"] += " Object search is temporarily unavailable for this map."
-    else:
-        blocked_tools.add("search_objects")
-    available_tools = [tool for tool in tools if tool["function"]["name"] not in blocked_tools]
+    if intents is None:
+        messages[0]["content"] += "\nIn this round declare_intents must be the first tool call."
     client, model = infomaniak_client()
     model_options = {"stream": False, "max_tokens": 1600, "temperature": 0.2, "reasoning_effort": "none"}
     provider = None
@@ -772,9 +850,8 @@ async def chat(request: Request):
     start = perf_counter()
     try:
         async with client, asyncio.timeout(30):
-            response = await client.chat.completions.create(
-                model=model, messages=messages, tools=available_tools, tool_choice=tool_choice, **model_options
-            )
+            options = {"tools": available_tools, "tool_choice": tool_choice} if available_tools else {}
+            response = await client.chat.completions.create(model=model, messages=messages, **options, **model_options)
     except (APITimeoutError, TimeoutError) as exc:
         raise HTTPException(504, "providerTimeout") from exc
     except APIStatusError as exc:
@@ -811,40 +888,9 @@ async def chat(request: Request):
             raise ValueError("invalid response content")
         fields = {"id": True, "type": True, "function": {"name", "arguments"}}
         calls = [Call.model_validate(call.model_dump(include=fields)) for call in raw_calls or []]
-        if any(call.function.name in blocked_tools for call in calls):
-            raise ValueError("map tool not requested")
-        if tool_choice != "auto" and not calls:
-            raise ValueError("required tool call missing")
-        if tool_choice == "required":
-            names = {call.function.name for call in calls}
-            if factual_address:
-                if "resolve_location" not in names or not names <= {"resolve_location", "search_layers"}:
-                    raise ValueError("address must be resolved first")
-            elif (names != {"search_layers"}
-                  and not (payload.theme_id and names == {"search_objects"} and not layer_lookup)):
-                raise ValueError("unexpected search tool")
-        if isinstance(tool_choice, dict):
-            name = tool_choice["function"]["name"]
-            if any(call.function.name != name for call in calls):
-                raise ValueError("unexpected tool")
-        # Infomaniak can add unused fields to an argument-free read.
-        for call in calls:
-            schema = schemas.get(call.function.name)
-            if schema and not schema["properties"]:
-                if not isinstance(json.loads(call.function.arguments), dict):
-                    raise ValueError("invalid read tool arguments")
-                call.function.arguments = "{}"
-        searches += check_calls(calls, used_ids)
-        if any(call.function.name == "zoom_to_result" for call in calls) and (
-            len(calls) != 1 or json.loads(calls[0].function.arguments)["result_ref"] != zoom_ref
-        ):
-            raise ValueError("zoom uses an unverified object")
-        if factual_address:
-            for call in calls:
-                if call.function.name == "query_features":
-                    args = json.loads(call.function.arguments)
-                    if (args["easting"], args["northing"]) != resolved_point(payload):
-                        raise ValueError("query uses an unverified point")
+        if calls or intents is None:
+            intents, round_searches = check_calls(payload, calls, used_ids, intents, evidence)
+            searches += round_searches
         if calls and (len(payload.rounds) + 1 >= limits["rounds"] or len(used_ids) > limits["calls"]
                       or searches > limits["searches"]):
             raise HTTPException(409, "chatLimit")
@@ -855,6 +901,7 @@ async def chat(request: Request):
             provider["tool_calls"] = [call.function.name for call in calls]
         if capture:
             request.state.payload_preview = preview({"messages": messages, "assistant": assistant})
-        return {"assistant": assistant, **browser_debug(request)}
+        return {"assistant": assistant, **({"pending": pending_intents(payload, intents, evidence)} if not calls else {}),
+                **browser_debug(request)}
     except (AttributeError, IndexError, KeyError, TypeError, ValueError, RecursionError) as exc:
         raise HTTPException(502, "invalidModelResponse") from exc

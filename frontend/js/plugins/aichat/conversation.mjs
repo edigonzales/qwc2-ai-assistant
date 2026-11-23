@@ -1,24 +1,19 @@
 import {createDiagnostics} from './diagnostics.mjs';
-import {limits, locationOrdinalPrefix, numberedLayer, ordinalPattern} from './tools.mjs';
+import {intentTool, limits, numberedLayer} from './tools.mjs';
 
 const idTools = new Set(['add_layer', 'remove_layer', 'get_layer_details']);
 const mapActions = new Set(['add_layer', 'remove_layer', 'zoom_to_lv95', 'zoom_to_result']);
-const locationPrefix = new RegExp(locationOrdinalPrefix, 'i');
 
 export function errorCode(error, fallback = 'chatFailed') {
     return /^[a-z][A-Za-z0-9]{0,59}$/.test(error?.message || '') ? error.message : fallback;
 }
 
-export async function runConversation({message, history, lastResults, themeId, runTool, signal, diagnostics = createDiagnostics(), onAction = () => {}, fetchImpl = fetch}) {
-    const requestedNumbers = [...message.matchAll(new RegExp(ordinalPattern, 'gi'))]
-        .filter(match => !locationPrefix.test(message.slice(0, match.index)));
-    const selected = requestedNumbers.length === 1 ? numberedLayer(lastResults, Number(requestedNumbers[0][1])) : null;
-    if (requestedNumbers.length === 1 && !selected) throw new Error('unknownResult');
-    const keepResults = requestedNumbers.length > 0 && !/\b(?:such(?:e|en)?|search|find)\b/i.test(message);
-    const knownIds = new Set((selected ? [selected] : lastResults).map(row => row.id));
-    for (const word of message.match(/[A-Za-z0-9_.:-]+/g) || []) knownIds.add(word.replace(/[.:]+$/, ''));
+export async function runConversation({message, history, lastResults, pending = [], themeId, runTool, signal,
+    diagnostics = createDiagnostics(), onAction = () => {}, fetchImpl = fetch}) {
+    let intents;
     const payload = {
         message,
+        pending,
         theme_id: themeId,
         history: history.slice(-limits.historyTurns),
         last_results: lastResults.map(({id, title}) => ({id, title})),
@@ -65,7 +60,10 @@ export async function runConversation({message, history, lastResults, themeId, r
         }
         if (!calls.length) {
             if (!assistant.content?.trim()) throw new Error('invalidModelResponse');
-            return {assistant: assistant.content.trim(), errors: [...errors]};
+            if (!Array.isArray(json.pending)) throw new Error('invalidModelResponse');
+            const confirmedActionsOnly = intents?.length && intents.every(scope => mapActions.has(scope.goal)) &&
+                !errors.size && !json.pending.length;
+            return {assistant: confirmedActionsOnly ? '' : assistant.content.trim(), errors: [...errors], pending: json.pending};
         }
         searches += calls.filter(call => ['search_layers', 'search_objects'].includes(call?.function?.name)).length;
         if (round + 1 === limits.rounds || callIds.size + calls.length > limits.calls || searches > limits.searches) {
@@ -86,12 +84,26 @@ export async function runConversation({message, history, lastResults, themeId, r
             let content;
             const toolStart = performance.now();
             try {
-                const args = JSON.parse(raw);
-                if (keepResults && ['search_layers', 'present_layer_results'].includes(name)) throw new Error('numberedSearch');
-                if (idTools.has(name) && !knownIds.has(args?.id)) throw new Error('unknownCandidate');
-                const data = await runTool(name, args, roundId);
+                if (name === intentTool) {
+                    if (intents || round !== 0 || results.length) throw new Error('invalidModelResponse');
+                    intents = JSON.parse(raw).intents.map(({goal, target, layer_result_number: number}) => {
+                        const selected = numberedLayer(lastResults, number);
+                        if (number && !selected) throw new Error('unknownResult');
+                        const knownIds = selected ? [selected.id] :
+                            (target.match(/[A-Za-z0-9_.:-]+/g) || []).map(word => word.replace(/[.:]+$/, ''));
+                        return {goal, selected, knownIds: new Set(knownIds)};
+                    });
+                    results.push({tool_call_id: call.id, content: '{"ok":true,"data":{}}'});
+                    continue;
+                }
+                const {intent, ...args} = JSON.parse(raw);
+                const scope = intents?.[intent - 1];
+                if (!scope) throw new Error('invalidModelResponse');
+                if (scope.selected && name === 'search_layers') throw new Error('numberedSearch');
+                if (idTools.has(name) && !scope.knownIds.has(args.id)) throw new Error('unknownCandidate');
+                const data = await runTool(name, args, roundId, intent);
                 signal?.throwIfAborted();
-                if (name === 'search_layers') data.layers.forEach(row => knownIds.add(row.id));
+                if (name === 'search_layers') data.layers.forEach(row => scope.knownIds.add(row.id));
                 content = JSON.stringify({ok: true, data});
                 if (content.length > limits.resultLength) throw new Error('resultTooLarge');
                 if (mapActions.has(name)) onAction(name, data);
@@ -100,8 +112,8 @@ export async function runConversation({message, history, lastResults, themeId, r
                     duration_ms: performance.now() - toolStart, result_count: Array.isArray(entries) ? entries.length : undefined,
                     map_confirmed: mapActions.has(name)});
                 if (name === 'present_layer_results' && args.search_only === true && calls.length === 1 &&
-                    searches > 0 && callIds.size === searches + 1 && errors.size === 0) {
-                    return {assistant: '', errors: []};
+                    intents.length === 1 && errors.size === 0) {
+                    return {assistant: '', errors: [], pending: []};
                 }
             } catch (error) {
                 signal?.throwIfAborted();

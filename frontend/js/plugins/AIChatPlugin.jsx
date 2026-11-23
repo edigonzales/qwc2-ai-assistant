@@ -73,6 +73,7 @@ export default function AIChatPlugin() {
     const scroll = useRef(null);
     const latest = useRef(null);
     const nextMessage = useRef(0);
+    const pendingIntents = useRef(null);
     const [input, setInput] = useState('');
     const [turns, setTurns] = useState([]);
     const [results, setResults] = useState([]);
@@ -100,6 +101,7 @@ export default function AIChatPlugin() {
 
     function clear() {
         cancel();
+        pendingIntents.current = null;
         setTurns([]);
         setResults([]);
         setObjectResults(null);
@@ -125,26 +127,38 @@ export default function AIChatPlugin() {
         setBusy(true);
         const confirmations = [];
         const turnTheme = store.getState().theme;
+        const followUp = pendingIntents.current && pendingIntents.current.theme === turnTheme ? pendingIntents.current.items : [];
+        pendingIntents.current = null;
         try {
             let presented;
+            const objects = new Map();
             const runTool = createQwcTurnTools(store, {
-                signal: controller.signal, diagnostics, onResults: rows => { presented = rows; },
-                onObjects: rows => setObjectResults({theme: turnTheme, rows})
+                signal: controller.signal, diagnostics,
+                onResults: rows => {
+                    presented = [...new Map([...(presented || []), ...rows].map(row => [row.id, row])).values()].slice(0, 10);
+                },
+                onObjects: (rows, intent) => {
+                    objects.set(intent, rows.map(row => ({...row, intent})));
+                    setObjectResults({theme: turnTheme, rows: [...objects.values()].flat()});
+                }
             });
             const history = turns.map(({user, assistant}) => ({user, assistant}));
             const result = await runConversation({
                 message, history, lastResults: results, themeId: turnTheme?.current?.id, runTool, signal: controller.signal, diagnostics,
+                pending: followUp.map(({goal, target}) => ({goal, target})),
                 onAction: (name, data) => confirmations.push(actionLabel(name, data))
             });
             controller.signal.throwIfAborted();
+            pendingIntents.current = {theme: turnTheme, items: result.pending};
             const issue = result.errors[0];
-            let answer = confirmations.join('\n').slice(0, limits.replyLength);
+            let answer = [...confirmations, result.assistant].filter(Boolean).join('\n').slice(0, limits.replyLength);
             if (!answer) {
                 if (issue) answer = errorLabel(issue);
                 else if (presented) answer = presented.length ? LocaleUtils.tr('aichat.found', presented.length) : LocaleUtils.tr('aichat.noResults');
                 else answer = result.assistant;
             }
-            const turn = {user: message, assistant: answer, failed: Boolean(issue && !confirmations.length), key: ++nextMessage.current};
+            const turn = {user: message, assistant: answer, failed: Boolean(issue && !confirmations.length && !result.assistant),
+                key: ++nextMessage.current};
             setTurns(previous => [...previous, turn].slice(-limits.historyTurns));
             if (presented) {
                 setResults(presented);
@@ -176,6 +190,9 @@ export default function AIChatPlugin() {
         setObjectNotice(null);
         try {
             const result = zoomToObject(store, object);
+            if (pendingIntents.current?.theme === objectResults.theme) {
+                pendingIntents.current.items = pendingIntents.current.items.filter(item => item.source_intent !== object.intent);
+            }
             setObjectNotice({ref: object.ref, text: actionLabel('zoom_to_result', result)});
         } catch (err) {
             setError({code: errorCode(err, 'toolFailed')});

@@ -1,6 +1,6 @@
 import definition from '../../../../shared/tools.json' with {type: 'json'};
 
-export const {limits, locationOrdinalPrefix, ordinalPattern} = definition;
+export const {limits, intentTool} = definition;
 const schemas = new Map(definition.tools.map(({function: tool}) => [tool.name, tool.parameters]));
 const idSchema = schemas.get('get_layer_details').properties.id;
 
@@ -42,7 +42,8 @@ export function numberedLayer(results, number) {
 
 export function createTurnTools({map, fetchImpl = fetch, signal, diagnostics, themeId, onObjects = () => {}, onResults = () => {}}) {
     const candidates = new Map();
-    let objects;
+    const objects = new Map();
+    let candidateCount = 0;
     let calls = 0;
     let searches = 0;
 
@@ -71,16 +72,19 @@ export function createTurnTools({map, fetchImpl = fetch, signal, diagnostics, th
         return data;
     }
 
-    async function search(query, round) {
+    async function search(query, round, intent) {
         if (++searches > limits.searches) throw new Error('searchLimit');
         const {layers: rows} = await readGeo('search_layers', {query: query.trim()}, round) ?? {};
         if (!Array.isArray(rows)) throw new Error('invalidCatalog');
+        const scoped = candidates.get(intent) || new Map();
+        candidates.set(intent, scoped);
         const found = [];
         for (const row of rows.slice(0, limits.perSearch)) {
-            if (candidates.size >= limits.candidates) break;
+            if (candidateCount >= limits.candidates) break;
             const layer = layerSummary(row, 180);
-            if (layer && !candidates.has(layer.id)) {
-                candidates.set(layer.id, layer);
+            if (layer && !scoped.has(layer.id)) {
+                scoped.set(layer.id, layer);
+                candidateCount++;
                 found.push(layer);
             }
         }
@@ -94,14 +98,14 @@ export function createTurnTools({map, fetchImpl = fetch, signal, diagnostics, th
         return {...layer, qwcLayerName: row.qwcLayerName, type: text(row.type, 40)};
     }
 
-    function present(ids) {
-        const results = [...new Set(ids)].map(id => candidates.get(id));
+    function present(ids, intent) {
+        const results = [...new Set(ids)].map(id => candidates.get(intent)?.get(id));
         if (results.some(result => !result)) throw new Error('unknownCandidate');
         onResults(results);
         return {ids: results.map(result => result.id)};
     }
 
-    return async function run(name, args, round) {
+    return async function run(name, args, round, intent = 0) {
         signal?.throwIfAborted();
         const schema = schemas.get(name);
         if (!schema || !valid(args, schema)) throw new Error('invalidTool');
@@ -114,27 +118,28 @@ export function createTurnTools({map, fetchImpl = fetch, signal, diagnostics, th
         case 'zoom_to_lv95': return map.zoom(args);
         case 'search_objects': {
             if (++searches > limits.searches) throw new Error('searchLimit');
-            objects = undefined;
-            onObjects([]);
+            objects.delete(intent);
+            onObjects([], intent);
             const data = await readGeo(name, args, round);
             map.checkTheme?.(signal);
             if (!Array.isArray(data?.candidates) || data.candidates.length > limits.objectResults) throw new Error('invalidGeoResponse');
-            objects = data;
-            onObjects(data.candidates);
+            objects.set(intent, data);
+            onObjects(data.candidates, intent);
             return data;
         }
         case 'zoom_to_result': {
-            if (objects?.zoom_ref !== args.result_ref) throw new Error('unknownObject');
-            const object = objects.candidates.find(candidate => candidate.ref === args.result_ref);
+            const result = objects.get(intent);
+            if (result?.zoom_ref !== args.result_ref) throw new Error('unknownObject');
+            const object = result.candidates.find(candidate => candidate.ref === args.result_ref);
             if (!object) throw new Error('unknownObject');
-            objects = undefined;
+            objects.delete(intent);
             return map.zoomObject(object);
         }
-        case 'search_layers': return search(args.query, round);
+        case 'search_layers': return search(args.query, round, intent);
         case 'get_layer_details': return details(args.id, round);
         case 'resolve_location':
         case 'query_features': return readGeo(name, args, round);
-        case 'present_layer_results': return present(args.ids);
+        case 'present_layer_results': return present(args.ids, intent);
         default: throw new Error('invalidTool');
         }
     };

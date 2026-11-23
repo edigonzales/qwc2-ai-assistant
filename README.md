@@ -6,7 +6,7 @@ Suchdienste von geo.so.ch. QWC2 stammt aus dem
 und verwendet dessen unveränderte Version `qwc2-lts@2026.0.30`. Die BSD-Lizenz
 steht in [frontend/LICENSE](frontend/LICENSE).
 
-FastAPI vermittelt den Chat an die OpenAI-kompatible Infomaniak-API und
+FastAPI vermittelt den Chat an die OpenAI-kompatible LLM-Inferenz-API und
 fragt die Solothurner Suche, `weblayers` und den Data Service ab. Der
 Browser ruft die Geo-Werkzeuge über `/assistant-api/v1/geo` auf. QWC2
 führt Kartenaktionen aus und lädt Legenden und Objektinformationen über
@@ -20,7 +20,7 @@ flowchart TB
     browser["Browser<br/>QWC2, Chat und Tool-Schleife"]
     proxy["Same-Origin-Proxy<br/>QWC2-Webserver"]
     assistant["FastAPI<br/>Chat und Geo-Werkzeuge"]
-    model["Infomaniak<br/>LLM-API"]
+    model["LLM-Inferenz-API"]
     geo["geo.so.ch<br/>Solothurner Geodienste"]
 
     browser -->|Chat und Geo-Werkzeuge| proxy
@@ -39,7 +39,7 @@ sequenceDiagram
     participant Browser as Browser / QWC2
     participant Proxy as Same-Origin-Proxy
     participant API as FastAPI
-    participant LLM as Infomaniak
+    participant LLM as LLM-Inferenz-API
     participant Geo as Solothurner Suche
 
     Nutzer->>Browser: Suche Karten zu Wasser und Grundwasser
@@ -111,6 +111,7 @@ Beispiele für Anfragen:
 - «Suche Hübeli.»
 - «Gehe zu Klosterplatz 1 in Solothurn.»
 - «Gehe zum Grundstück 123 in Bellach.»
+- «Lade den Layer mit den Altlasten und gehe zu Grundstück 2084 in Solothurn.»
 - «In welchem Gewässerschutzbereich liegt Klosterplatz 1 in Solothurn?»
 - «Mehr Informationen zu Nummer 2.»
 - «Zeige Nummer 2 auf der Karte.»
@@ -125,9 +126,11 @@ zoomt QWC2 bei vollständig ausgewertetem, eindeutigem Treffer auf ca. 1:1000
 für Adressen oder auf den ganzen Suchausschnitt für Grundstücke. Bei mehreren
 Treffern oder einer gekürzten Liste kannst du einen Eintrag direkt auswählen
 oder den Befehl mit Ort, Objektart oder Grundbuchkreis präzisieren.
-Für Kartenänderungen gibt der Server pro Nachricht das zu einem klar
-erkannten Auftrag passende Kartenwerkzeug frei. Die Beispielsätze zeigen
-die unterstützten Formen.
+Das Modell meldet die GIS-Aufträge einer Nachricht und ordnet seine Aufrufe
+dem jeweiligen Auftrag zu. Der Server prüft die Argumente und Nachweise
+pro Auftrag. Bei einer Rückfrage kann der Chat einen anderen eindeutigen
+Auftrag bereits ausführen. Die Antwort auf die Rückfrage setzt den offenen
+Auftrag mit einer frischen Suche fort.
 
 Pro Nachricht sind vier Modellrunden und acht Tool-Aufrufe möglich.
 Davon sind höchstens drei Karten- oder Objektsuchen zulässig.
@@ -144,7 +147,7 @@ Modellrunde erfordern.
 - Die Chat-Seitenleiste rendert Nachrichten, Treffer und Direktaktionen. [AIChatPlugin.jsx](frontend/js/plugins/AIChatPlugin.jsx)
 - Browser und FastAPI lesen die Tool-Schemas und Grenzen aus derselben Datei. [tools.json](shared/tools.json)
 - Host- und Containerbetrieb nutzen dieselben Proxy-Routen für Live-Karte, Geo-Werkzeuge und Chat. [remote.cjs](frontend/server/remote.cjs)
-- FastAPI validiert Toolargumente, liest die kantonalen Dienste und vermittelt Modellaufrufe an Infomaniak. [app.py](assistant/app.py)
+- FastAPI validiert Toolargumente, liest die kantonalen Dienste und vermittelt Modellaufrufe an die Inferenz-API. [app.py](assistant/app.py)
 
 ## Prüfen
 

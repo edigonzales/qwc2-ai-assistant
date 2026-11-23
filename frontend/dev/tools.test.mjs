@@ -23,6 +23,23 @@ test('object zoom consumes only the most recent verified result in this turn', a
     await assert.rejects(run('zoom_to_result', {result_ref: second.ref}), {message: 'unknownObject'});
 });
 
+test('object results from parallel intents cannot be used for each other', async() => {
+    const objects = [
+        {ref: 'a'.repeat(32), label: 'Olten', bbox: [2632958, 1240112, 2637054, 1246565]},
+        {ref: 'b'.repeat(32), label: 'Bellach', bbox: [2602821, 1227258, 2605896, 1230355]}
+    ];
+    let index = 0;
+    const run = createTurnTools({map: {zoomObject: object => object.label}, fetchImpl: () => {
+        const object = objects[index++];
+        return Response.json({candidates: [object], zoom_ref: object.ref});
+    }});
+    await run('search_objects', {query: 'Olten'}, 1, 1);
+    await run('search_objects', {query: 'Bellach'}, 1, 2);
+    await assert.rejects(run('zoom_to_result', {result_ref: objects[0].ref}, 2, 2), {message: 'unknownObject'});
+    assert.equal(await run('zoom_to_result', {result_ref: objects[0].ref}, 2, 1), 'Olten');
+    assert.equal(await run('zoom_to_result', {result_ref: objects[1].ref}, 2, 2), 'Bellach');
+});
+
 function row(id, extra = {}) {
     return {
         id, title: 'Layer ' + id, themeTitle: 'Wasser',
