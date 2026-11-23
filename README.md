@@ -17,50 +17,59 @@ Neuladen verworfen.
 
 ```mermaid
 flowchart TB
-    browser["Browser<br/>QWC2, Chat und Tool-Schleife"]
+    browser["Browser<br/>Chatverlauf, Tool-Schleife und QWC2-Kartenaktionen"]
     proxy["Same-Origin-Proxy<br/>QWC2-Webserver"]
-    assistant["FastAPI<br/>Chat und Geo-Werkzeuge"]
-    model["LLM-Inferenz-API"]
+    assistant["FastAPI<br/>Prüft Tool-Aufrufe je Auftrag<br/>Führt Geo-Lesezugriffe aus"]
+    model["LLM-Inferenz-API<br/>LLM erkennt GIS-Aufträge<br/>und wählt Tool-Aufrufe"]
     geo["geo.so.ch<br/>Solothurner Geodienste"]
 
-    browser -->|Chat und Geo-Werkzeuge| proxy
-    browser -->|Karte, Layerdefinitionen und Objektinfo| proxy
+    browser -->|POST /assistant-api/v1/chat und /assistant-api/v1/geo| proxy
+    browser -->|QWC2-Kartenzugriffe| proxy
     proxy -->|POST /api/v1/chat und /api/v1/geo| assistant
-    proxy -->|Lesende Kartendienste| geo
-    assistant -->|Chat Completions| model
+    proxy -->|Konfiguration, Karte und Objektinfo| geo
+    assistant <-->|Chatkontext, Tools und Modellantwort| model
     assistant -->|Suche, weblayers und Data Service| geo
 ```
 
-### Ablauf einer Wassersuche
+### Ablauf eines kombinierten Kartenbefehls
 
 ```mermaid
 sequenceDiagram
     actor Nutzer
     participant Browser as Browser / QWC2
-    participant Proxy as Same-Origin-Proxy
+    participant Proxy
     participant API as FastAPI
     participant LLM as LLM-Inferenz-API
-    participant Geo as Solothurner Suche
+    participant Geo as geo.so.ch
 
-    Nutzer->>Browser: Suche Karten zu Wasser und Grundwasser
-    loop Modellrunden bis zur Trefferliste
-        Browser->>Proxy: POST /assistant-api/v1/chat<br/>Verlauf und bisherige Tool-Ergebnisse
-        Proxy->>API: POST /api/v1/chat
-        API->>LLM: Nachrichten, Tools und tool_choice
-        LLM-->>API: Tool-Aufrufe
-        API-->>Proxy: Validierte Modellantwort
-        Proxy-->>Browser: Validierte Modellantwort
-        alt search_layers
-            Browser->>Proxy: POST /assistant-api/v1/geo
-            Proxy->>API: POST /api/v1/geo
-            API->>Geo: Thematische Kartensuche
-            Geo-->>API: Kandidaten
-            API-->>Proxy: Kompakte Treffer
-            Proxy-->>Browser: Kompakte Treffer
-        else present_layer_results
-            Browser->>Browser: IDs prüfen
-            Browser-->>Nutzer: Nummerierte Trefferliste und Trefferzahl anzeigen
+    Nutzer->>Browser: Lade den Layer mit den Altlasten<br/>und gehe zu Grundstück 2084 in Solothurn
+    loop Modellrunden mit bisherigen Tool-Ergebnissen
+        Browser->>Proxy: POST /assistant-api/v1/chat
+        Proxy->>API: Chatkontext weiterleiten
+        API->>LLM: Nachrichten und verfügbare Tools
+        LLM-->>API: Tool-Aufrufe oder Chatantwort
+        API-->>Proxy: Geprüfte Antwort je Auftrag
+        Proxy-->>Browser: Antwort weiterleiten
+        opt Erste Runde
+            Browser->>Browser: Beide Aufträge aus declare_intents registrieren
         end
+        loop Je Aufruf von search_layers oder search_objects
+            Browser->>Proxy: POST /assistant-api/v1/geo
+            Proxy->>API: Suchparameter weiterleiten
+            API->>Geo: Layer oder Grundstück suchen
+            Geo-->>API: Treffer
+            API-->>Proxy: Layer-IDs oder Objekttreffer<br/>Zoom-Referenz bei eindeutigem, exaktem Objekttreffer
+            Proxy-->>Browser: Ergebnisse weiterleiten
+        end
+        opt Kartenaktionen aus einer Folgerunde
+            Browser->>Browser: add_layer mit bestätigter Layer-ID<br/>zoom_to_result mit bestätigter Referenz<br/>QWC2 zoomt auf die Grundstücks-BBOX
+        end
+    end
+    opt Kartenaktionen ausgeführt
+        Browser-->>Nutzer: Ausgeführte Kartenaktionen bestätigen
+    end
+    opt Grundstück weiterhin mehrdeutig
+        Browser-->>Nutzer: Rückfrage und Trefferauswahl<br/>Der Layer kann bereits geladen sein
     end
 ```
 
