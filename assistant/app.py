@@ -86,7 +86,8 @@ object_prompt = """
 Use search_objects for named places and objects, e.g. Hübeli, Klosterplatz 1 Solothurn,
 123 Bellach, or the digits of an EGID. Use the configured filter IDs given below. For an
 explicit object type narrow to its filters, including both parcel filters for an unqualified
-parcel request. Preserve the supplied name, number, place and district, and only use
+parcel request. Put the type in filters, and keep the name or identifier in query.
+Preserve the supplied name, number, place and district, and only use
 qualifiers from the user's request. Report counts as search-service counts, which may
 include similar hits. The UI presents selectable candidates. Use zoom_to_result only
 with the returned zoom_ref. If absent, refine using the user's terms or ask them to
@@ -412,7 +413,7 @@ async def object_filters(theme_id):
         return []
     global theme_search_config
     refreshed, filters_by_theme = theme_search_config
-    if perf_counter() - refreshed < 30:
+    if refreshed and perf_counter() - refreshed < 30:
         return filters_by_theme.get(theme_id, [])
     try:
         async with asyncio.timeout(3):
@@ -532,7 +533,9 @@ async def search_objects(query, filters=None, *, theme_id=None):
         label = geo_text(hit.get("display"), 160)
         if not label:
             raise HTTPException(502, "invalidLocation")
-        matches = object_exact(term, label, source)
+        category = counts.get(source, {}).get("type", "")
+        name_term = re.sub(rf"^{re.escape(category)}[:\s]+", "", term, flags=re.IGNORECASE) if category else term
+        matches = object_exact(name_term, label, source)
         # The search service returns substrings even for a complete parcel number.
         if label.startswith("GB-Nr:") and re.match(r"^\d+\s+", term) and not matches:
             continue
@@ -543,14 +546,15 @@ async def search_objects(query, filters=None, *, theme_id=None):
         seen.add(identity)
         ref = uuid4().hex
         candidates.append({"ref": ref, "label": label, "filter": source,
-                           "type": counts.get(source, {}).get("type", ""), "bbox": bbox})
+                           "type": category, "bbox": bbox})
         if matches:
-            exact.append(ref if bbox is not None else None)
+            exact.append((ref if bbox is not None else None, name_term))
     # Some facets report -1 when the limit prevents an exact count.
     partial = len(raw) > limit or any(counts.get(source, {}).get("count", 0) != amount
                                       for source, amount in returned.items())
-    return {"query": term, "candidates": candidates, "counts": list(counts.values()), "partial": partial,
-            "zoom_ref": exact[0] if len(exact) == 1 and not partial else None}
+    zoom_ref, proof_term = exact[0] if len(exact) == 1 and not partial else (None, term)
+    return {"query": proof_term, "candidates": candidates, "counts": list(counts.values()), "partial": partial,
+            "zoom_ref": zoom_ref}
 
 
 async def search_layers(query):

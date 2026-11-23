@@ -123,11 +123,13 @@ class ChatTests(unittest.TestCase):
              "GB-Nr: 379 - Kappel [Kappel (SO)] (Proj. Liegenschaft)"),
             (object_filters[5], "Passwang", "Passwang", "Passwang, Mümliswil-Ramiswil (Geländename)"),
             (object_filters[0], "EGID: 333333", "333333", "EGID: 333333 (Gebäude)"),
+            (object_filters[6], "Gemeinde Olten", "Gemeinde Olten", "Olten | 2581 (Gemeinde)"),
         ]
         for source, query, term, label in cases:
             with self.subTest(query=query):
+                category = label.rsplit("(", 1)[-1].rstrip(")")
                 body = {"results": [object_hit(source, label)],
-                        "result_counts": [{"dataproduct_id": source, "count": 1}]}
+                        "result_counts": [{"dataproduct_id": source, "count": 1, "filterword": category}]}
                 args = {"name": "search_objects", "theme_id": "test", "args": {"query": query}}
                 with patch("app.object_filters", return_value=object_filters), patch("app.get_geo", return_value=body) as geo:
                     result = self.api.post("/api/v1/geo", json=args).json()
