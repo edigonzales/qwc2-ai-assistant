@@ -79,7 +79,7 @@ Setze `JAVA_HOME` auf die GraalVM-25-Installation und stelle `native-image` im `
 ```sh
 export PATH="$JAVA_HOME/bin:$PATH"
 native-image --version
-jbang export native -O "$out/assistant-native" assistant-java/Assistant.java
+GRAALVM_HOME="$JAVA_HOME" jbang export native -O "$out/assistant-native" assistant-java/Assistant.java
 "$out/assistant-native"
 ```
 
@@ -93,13 +93,29 @@ npm test
 Mit einem Python-Interpreter, in dem `assistant/requirements.txt` installiert ist, starten dieselben Tests zusätzlich die unveränderte FastAPI-App gegen dieselben lokalen HTTP-Fixtures. Die Tests vergleichen Status und JSON-Werte. Zufällige Objektreferenzen und JSON-Formatierung in Toolargumenten werden beim Vergleich normalisiert. Die Java-Tests prüfen zusätzlich, ob `zoom_ref` genau zu einem ausgegebenen Treffer gehört.
 
 ```sh
-python3 -m venv /tmp/qwc-parity-venv
+python3.12 -m venv /tmp/qwc-parity-venv
 /tmp/qwc-parity-venv/bin/pip install -r assistant/requirements.txt
 jbang assistant-java/AssistantTest.java /tmp/qwc-parity-venv/bin/python
 ```
+
+## Messung
+
+Apple M1 mit macOS 15.8.1, Temurin 25.0.5.1, JBang 0.138.0 und Oracle GraalVM 25.0.4+7.1. Median aus fünf Prozessstarts je Variante auf dem laufenden Arbeitsplatzrechner. Ab Prozessstart wurde `/healthz` bis zur ersten erfolgreichen Antwort im Abstand von 5 ms abgefragt. Nach einer Sekunde Leerlauf wurde der RSS mit `ps -o rss=` erfasst. Danach folgte die erste Altlasten-Suche über HTTPS bei geo.so.ch. Ihre Dauer enthält Netzwerklatenz.
+
+| Variante | Artefakt (Bytes) | Bis Healthcheck | RSS im Leerlauf | Erste Geo-Suche | Funktionstest | Build-Aufwand |
+|---|---:|---:|---:|---:|---|---|
+| Fat-JAR | 351 008 | 673,3 ms | 78,0 MiB | 306,9 ms · HTTP 200 | PASS | JBang-Export |
+| Leyden | 32 057 158 | 333,8 ms | 68,6 MiB | 246,5 ms · HTTP 200 | PASS | Portabler Export und HTTP-Training |
+| Native Image | 35 330 704 | 45,9 ms | 17,7 MiB | 105,8 ms · HTTP 200 | PASS | GraalVM und Xcode-Werkzeuge, rund 246 s Build |
+
+Bei Leyden umfasst die Grösse das portable JAR mit Bibliotheken und 31 703 040 Bytes AOT-Cache. Das JVM-Protokoll bestätigte `Opened AOT cache` und `Using AOT-linked classes: true`. Der Funktionstest prüfte je Variante Health, alle fünf Geo-Werkzeuge, einen abgelehnten Tool-Aufruf, echtes Function Calling und Browser-Diagnostik über HTTP. Im JBang-Testlauf bestanden 13 Testgruppen und 76 Vergleiche der HTTP-Antworten mit FastAPI.
+
+Im QWC2-Browser lud der kombinierte Auftrag den Kataster der belasteten Standorte und zeigte den ganzen Ausschnitt von Grundstück 2084 in Solothurn. Ein kontrollierter Mehrdeutigkeitsfall hielt den Grundstücksauftrag offen, lud den Layer und löste nach «Altstadt» nur die neue Objektsuche und den Zoom aus. Die Punktabfrage am Klosterplatz 1 ergab `Au`.
 
 ## Grenzen
 
 Die Interpretation von Absicht, Negation und Hypothesen folgt wie in FastAPI der Modelldeklaration. Der Server erzwingt die Tool- und Nachweisregeln für den deklarierten Auftrag. Die Tests und die Live-Prüfung sind Stichproben für diese Modellentscheidung.
 
 Eine syntaktisch ungültige JSON-Antwort des Inferenzdienstes liefert in Java `502 invalidModelResponse`. In diesem Fall wirft das Python-SDK bereits vor der Modellvalidierung eine Ausnahme und FastAPI liefert HTTP 500. Java begrenzt zusätzlich die Providerantwort auf 4 MiB. Das bestehende 4-MiB-Limit der Solothurner Antwort bleibt erhalten.
+
+Beim Live-Befehl «Suche das Grundstück 2084 in Solothurn, aber zoome nicht» lieferten beide Backends `502 invalidModelResponse`. Die Karte blieb unverändert. Die hypothetische Zoomfrage wurde ohne Kartenänderung beantwortet.
