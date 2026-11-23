@@ -116,3 +116,41 @@ Eingabeentwurf blieben sichtbar. Der Proxy lieferte `mapClickAction: 'identify'`
 in beiden Gerätekonfigurationen. Der Klick wurde auf dem Desktop geprüft.
 
 Lokal bestanden 41 Node-Tests und `git diff --check`.
+
+## Generische Objektsuche und Navigation
+
+Basis `f3d8e9972a5de131d1ab8dfd978901c2583f3b46`. OpenCode 2.0.28
+mit `deepseek/deepseek-flash` meldete für `0e5ef06` und `5f0f3b9`
+**FAIL**. Die Korrektur vereinheitlicht die Eingabenormalisierung, hält
+Layer- und Punktabfragen an die bisherigen Nachweise gebunden und lässt
+Treffer nach einem späteren Chatfehler sichtbar. Die Nachprüfung
+`3884c29cdc59cc333dc8f48c839422a758146f7e` ergab **PASS**. Sie führte
+42 Node- und 33 Python-Tests aus. Die gezielte Nachprüfung des finalen
+Produktcommits `5e4bd0861cfd3a539243493b577b9956966e3112` ergab **PASS**.
+Sie prüfte den Abgleich von Namen mit vorangestellter Objektart, den kalten
+Konfigurationscache und die 33 Python-Tests. Beide Nachprüfungen liefen offline.
+
+Lokal bestanden
+42 Node- und 33 Python-Tests, gezieltes ESLint, Compose-Build und
+Compose-Konfigurationsprüfung sowie `git diff --check`.
+
+Chromium prüfte mit Infomaniak (`Qwen/Qwen3.8-27B-FP8`) und der
+kantonalen Volltextsuche im Standardthema alle acht Objektfilter. Der Klosterplatz 1
+wurde auf LV95 2607600 / 1228517 bei 1:945 zentriert. Die Karte umfasste
+die BBOX von Grundstück 123 in Bellach. Für Nummer 123 in Messen erschien
+eine Rückfrage. Sowohl der Klick auf Brunnenthal als auch der präzisierte
+Navigationsbefehl zeigten den passenden Ausschnitt. Die breite Hübeli-Suche
+liess die Karte stehen. Die gezielte Flurnamen- und Strassensuche führte
+zum jeweiligen Objekt. Weitere Zoom-Prüfungen betrafen Olten, den
+Geländenamen Passwang, das projektierte Grundstück 379 in Kappel und das
+Gebäude mit EGID 333333. Im eBau-Thema wurde der Adresszoom wiederholt.
+
+Die bestehende Wassersuche, das Anzeigen und Entfernen der Grundwassergruppe,
+die direkte LV95-Zentrierung und die Fachantwort `Au` am Klosterplatz
+wurden im Browser ebenfalls geprüft. Bei einem simulierten Modellfehler nach
+der erfolgreichen Live-Suche blieben die Messen-Treffer auswählbar.
+Automatischer Zoom setzt einen eindeutigen, vollständig ausgewerteten Treffer
+voraus. Bei gekürzten
+Suchantworten sind Eingrenzung und die direkte Auswahl eines sichtbaren
+Treffers möglich. Freie Befehlsvarianten können ausserhalb der erkannten
+ausdrücklichen Navigationsformen liegen.
