@@ -254,11 +254,10 @@ def check_calls(chat, calls, used_ids, intents, evidence):
         for intent in intents:
             allowed_words = object_words(chat.message).split()
             target_words = set(object_words(intent["target"]).split())
-            if number := intent.get("layer_result_number"):
+            number = intent.get("layer_result_number")
+            if number:
                 if intent["goal"] not in layer_id_tools or number > len(chat.last_results):
                     raise ValueError("unknown layer result number")
-                row = chat.last_results[number - 1]
-                allowed_words += object_words(f"Nummer {number} {row.title} {row.id}").split()
             if "resume" in intent:
                 index = intent["resume"]
                 if index > len(chat.pending) or index in resumed or intent["goal"] != chat.pending[index - 1].goal:
@@ -275,7 +274,9 @@ def check_calls(chat, calls, used_ids, intents, evidence):
                         raise ValueError("resumed target is too long")
                     intent["target"] = combined
                 allowed_words += prior_words
-            if intent["goal"] not in {"get_map_state", "get_visible_layers"} and not (
+            # A numbered request is bound to the selected catalog ID, even when
+            # the model describes the target with an abbreviated display name.
+            if not number and intent["goal"] not in {"get_map_state", "get_visible_layers"} and not (
                 target_words <= set(allowed_words)
             ):
                 raise ValueError("unsupported intent target")

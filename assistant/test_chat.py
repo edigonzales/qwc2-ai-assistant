@@ -234,7 +234,7 @@ class ChatTests(unittest.TestCase):
         self.requests.clear()
         response = self.send({**payload, "message": "Entferne bitte den ersten Treffer wieder."},
                              httpx.Response(200, json=completion(calls=[
-                                 declare(("remove_layer", "Fluss", {"layer_result_number": 1})),
+                                 declare(("remove_layer", "erster Suchtreffer", {"layer_result_number": 1})),
                                  call("remove_layer", arguments={"id": "water.one"}),
                              ])))
         self.assertEqual(response.status_code, 200)
