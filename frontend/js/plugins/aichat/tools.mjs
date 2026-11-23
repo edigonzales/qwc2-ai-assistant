@@ -115,6 +115,7 @@ export function createTurnTools({map, fetchImpl = fetch, signal, diagnostics, th
         case 'search_objects': {
             if (++searches > limits.searches) throw new Error('searchLimit');
             objects = undefined;
+            onObjects([]);
             const data = await readGeo(name, args, round);
             map.checkTheme?.(signal);
             if (!Array.isArray(data?.candidates) || data.candidates.length > limits.objectResults) throw new Error('invalidGeoResponse');

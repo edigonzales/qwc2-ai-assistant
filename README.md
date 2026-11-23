@@ -120,10 +120,11 @@ Beispiele für Anfragen:
 **Details** liest die Metadaten eines Kartentreffers. **Anzeigen** schaltet
 einen Layer ein oder zoomt auf einen Objekttreffer. Nummern im Chat beziehen
 sich auf die letzte Layerliste. Die Objektsuche verwendet die Volltextfilter
-des aktuellen Kartenthemas ohne `foreground`. Bei eindeutiger Adresse zoomt
-QWC2 auf ca. 1:1000, bei Grundstücken auf den ganzen Suchausschnitt.
-Bei mehreren Treffern kannst du einen Eintrag direkt auswählen oder den
-Befehl mit Ort, Objektart oder Grundbuchkreis präzisieren.
+des aktuellen Kartenthemas ohne `foreground`. Nach einem Navigationsbefehl
+zoomt QWC2 bei vollständig ausgewertetem, eindeutigem Treffer auf ca. 1:1000
+für Adressen oder auf den ganzen Suchausschnitt für Grundstücke. Bei mehreren
+Treffern oder einer gekürzten Liste kannst du einen Eintrag direkt auswählen
+oder den Befehl mit Ort, Objektart oder Grundbuchkreis präzisieren.
 Für Kartenänderungen gibt der Server pro Nachricht das zu einem klar
 erkannten Auftrag passende Kartenwerkzeug frei. Die Beispielsätze zeigen
 die unterstützten Formen.

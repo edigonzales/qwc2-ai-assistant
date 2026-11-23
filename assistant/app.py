@@ -24,6 +24,7 @@ tools = definition["tools"]
 limits = definition["limits"]
 schemas = {entry["function"]["name"]: entry["function"]["parameters"] for entry in tools}
 id_schema = schemas["get_layer_details"]["properties"]["id"]
+theme_search_config = (0.0, {})
 metadata_request = re.compile(
     r"\b(?:informationen|information|infos|details|metadaten|metadata|beschreibung|description|legende|legend)\b",
     re.IGNORECASE
@@ -281,7 +282,7 @@ def search_command(message):
 def thematic_search(message):
     return bool(
         (search_command(message) and re.match(
-            r"^\w+\s+(?:(?:mir|me|die|den|der|das|ein(?:e|en)?|the|passende|thematische)\s+)*"
+            r"^\w+\s+(?:(?:mir|me|nach|im|in|zum|zur|die|den|der|das|dem|ein(?:e|en|em|er)?|the|passende|thematische)\s+)*"
             r"(?:karten?|maps?|layer|layers|ebenen?)\b", message))
         or re.match(r"^(?:zeig(?:e)?|show)\s+(?:(?:mir|me)\s+)?(?:(?:die|the)\s+)?"
                     r"(?:layer|layers|ebenen|karten|maps)\s+(?:zu|zum|zur|über|about)\b", message)
@@ -409,34 +410,37 @@ async def get_geo(path, params, unavailable, invalid, missing=None):
 async def object_filters(theme_id):
     if not theme_id:
         return []
+    global theme_search_config
+    refreshed, filters_by_theme = theme_search_config
+    if perf_counter() - refreshed < 30:
+        return filters_by_theme.get(theme_id, [])
     try:
         async with asyncio.timeout(3):
             data = await get_geo("/map/themes.json", {}, "locationUnavailable", "invalidLocation")
     except TimeoutError:
         raise HTTPException(502, "locationUnavailable")
+    filters_by_theme = {}
     pending = [data.get("themes")]
     while pending:
         theme = pending.pop()
         if not isinstance(theme, dict):
             continue
-        for key in ("groups", "items"):
+        for key in ("groups", "items", "subdirs"):
             if isinstance(theme.get(key), list):
                 pending.extend(theme[key])
-        if theme.get("id") != theme_id:
+        ident, providers = theme.get("id"), theme.get("searchProviders")
+        if not valid(ident, id_schema) or not isinstance(providers, list):
             continue
-        providers = theme.get("searchProviders")
-        if not isinstance(providers, list):
-            return []
         filters = {}
         for provider in providers:
             if isinstance(provider, dict) and provider.get("provider") == "fulltext":
                 params = provider.get("params")
                 defaults = params.get("default") if isinstance(params, dict) else None
                 if isinstance(defaults, list):
-                    filters.update((value, None) for value in defaults if valid(value, id_schema)
-                                   and value not in {"foreground", "dataproduct"})
-        return list(filters)
-    return []
+                    filters.update((value, None) for value in defaults if valid(value, id_schema) and value != "foreground")
+        filters_by_theme[ident] = list(filters)
+    theme_search_config = (perf_counter(), filters_by_theme)
+    return filters_by_theme.get(theme_id, [])
 
 
 def object_words(value):
@@ -449,7 +453,9 @@ def parcel_names(label):
         return set()
     number, district, municipality = match.groups()
     # In merged municipalities the label includes both the land registry district and municipality.
-    names = (f"{number} {municipality or district}", f"{number} {district} {municipality or ''}")
+    names = [f"{number} {municipality or district}"]
+    if municipality:
+        names.extend((f"{number} {district} {municipality}", f"{number} {municipality} {district}"))
     return {object_words(name) for value in names
             for name in (value, re.sub(r"\s*\(SO\)\s*$", "", value, flags=re.IGNORECASE))}
 
@@ -480,6 +486,20 @@ def object_bbox(hit):
     return None
 
 
+def object_search_text(query, selected):
+    term = " ".join(query.replace(",", " ").split())
+    term = re.sub(r"^(?:(?:(?:projektiertes|rechtskräftiges)\s+)?(?:grundstück|grundstueck|parzelle|gb-nr\.?)"
+                  r"\s*:?\s*(?:nr\.?\s*)?(?=\d)|adresse\s*:?\s+)", "", term, flags=re.IGNORECASE)
+    if egid := re.fullmatch(r"EGID\s*:?\s*(\d+)", term, flags=re.IGNORECASE):
+        return egid[1]
+    if re.match(r"^\d+\s", term):
+        return re.sub(r"\s+(?:in(?: der gemeinde)?|im grundbuchkreis)\s+", " ", term, flags=re.IGNORECASE)
+    if address_layer in selected and (parts := address_fields(term)):
+        if selected == [address_layer] or re.search(r"\b\d+[a-z]?\s+in\s+", term, re.IGNORECASE):
+            return " ".join(part for part in parts if part)
+    return term
+
+
 async def search_objects(query, filters=None, *, theme_id=None):
     defaults = await object_filters(theme_id)
     if not defaults:
@@ -487,11 +507,7 @@ async def search_objects(query, filters=None, *, theme_id=None):
     if filters and not set(filters) <= set(defaults):
         raise HTTPException(400, "invalidTool")
     selected = list(dict.fromkeys(filters or defaults))
-    term = " ".join(query.replace(",", " ").split())
-    if egid := re.fullmatch(r"EGID\s*:?\s*(\d+)", term, flags=re.IGNORECASE):
-        term = egid[1]
-    if selected == [address_layer] and (parts := address_fields(term)):
-        term = " ".join(part for part in parts if part)
+    term = object_search_text(query, selected)
     limit = limits["objectResults"]
     data = await get_geo("/api/search/v2/", {"searchtext": term, "filter": ",".join(selected), "limit": limit},
                          "locationUnavailable", "invalidLocation")
@@ -503,7 +519,7 @@ async def search_objects(query, filters=None, *, theme_id=None):
         if not isinstance(row, dict):
             raise HTTPException(502, "invalidLocation")
         source, count = row.get("dataproduct_id"), row.get("count")
-        if source in selected and type(count) is int:
+        if source in selected and source != "dataproduct" and type(count) is int:
             counts[source] = {"filter": source, "type": geo_text(row.get("filterword"), 50), "count": count}
 
     candidates, seen, exact = [], set(), []
@@ -533,7 +549,7 @@ async def search_objects(query, filters=None, *, theme_id=None):
     # Some facets report -1 when the limit prevents an exact count.
     partial = len(raw) > limit or any(counts.get(source, {}).get("count", 0) != amount
                                       for source, amount in returned.items())
-    return {"query": query, "candidates": candidates, "counts": list(counts.values()), "partial": partial,
+    return {"query": term, "candidates": candidates, "counts": list(counts.values()), "partial": partial,
             "zoom_ref": exact[0] if len(exact) == 1 and not partial else None}
 
 
@@ -717,7 +733,8 @@ async def chat(request: Request):
 
     phrase = re.sub(r"^(?:bitte|please)\s+", "", payload.message.strip().lower())
     mutation = map_command(phrase)
-    factual_address = mutation != "zoom_to_result" and address_question(phrase)
+    factual_address = address_question(phrase)
+    layer_lookup = mutation is None and thematic_search(phrase)
     tool_choice = tool_choice_for(payload, phrase, mutation)
     blocked_tools = map_mutations - {mutation}
     zoom_ref = object_zoom_ref(payload) if mutation == "zoom_to_result" else None
@@ -725,8 +742,7 @@ async def chat(request: Request):
         blocked_tools.add("zoom_to_result")
     if mutation == "zoom_to_result" and not payload.theme_id:
         raise HTTPException(503, "mapNotReady")
-    if (payload.theme_id and (mutation is None or mutation == "zoom_to_result")
-            and not thematic_search(phrase) and not factual_address):
+    if payload.theme_id and (mutation == "zoom_to_result" or mutation is None and not layer_lookup and not factual_address):
         try:
             filters = await object_filters(payload.theme_id)
         except HTTPException:
@@ -801,7 +817,7 @@ async def chat(request: Request):
                 if "resolve_location" not in names or not names <= {"resolve_location", "search_layers"}:
                     raise ValueError("address must be resolved first")
             elif (names != {"search_layers"}
-                  and not (payload.theme_id and names == {"search_objects"} and not thematic_search(phrase))):
+                  and not (payload.theme_id and names == {"search_objects"} and not layer_lookup)):
                 raise ValueError("unexpected search tool")
         if isinstance(tool_choice, dict):
             name = tool_choice["function"]["name"]

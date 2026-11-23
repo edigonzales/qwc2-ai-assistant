@@ -124,16 +124,16 @@ export default function AIChatPlugin() {
         setObjectNotice(null);
         setBusy(true);
         const confirmations = [];
+        const turnTheme = store.getState().theme;
         try {
             let presented;
-            let objects;
             const runTool = createQwcTurnTools(store, {
                 signal: controller.signal, diagnostics, onResults: rows => { presented = rows; },
-                onObjects: rows => { objects = rows; }
+                onObjects: rows => setObjectResults({theme: turnTheme, rows})
             });
             const history = turns.map(({user, assistant}) => ({user, assistant}));
             const result = await runConversation({
-                message, history, lastResults: results, themeId: theme.current?.id, runTool, signal: controller.signal, diagnostics,
+                message, history, lastResults: results, themeId: turnTheme?.current?.id, runTool, signal: controller.signal, diagnostics,
                 onAction: (name, data) => confirmations.push(actionLabel(name, data))
             });
             controller.signal.throwIfAborted();
@@ -150,7 +150,6 @@ export default function AIChatPlugin() {
                 setResults(presented);
                 setDetails(null);
             }
-            if (objects) setObjectResults({theme, rows: objects});
             setError(issue ? {code: issue, partial: confirmations.length > 0} : null);
             diagnostics.record('chat.display', {display: confirmations.length ? 'map_confirmation' : issue ? 'error' : presented ? 'results' : 'model_text',
                 result_count: presented?.length, confirmations: confirmations.length, error: issue});

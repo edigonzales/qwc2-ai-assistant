@@ -81,7 +81,7 @@ class ChatTests(unittest.TestCase):
             return {"results": [object_hit(source, "Hübeli (Objekt)") for source in object_filters],
                     "result_counts": [{"dataproduct_id": source, "count": 1} for source in object_filters]}
 
-        with patch("app.get_geo", side_effect=geo):
+        with patch("app.get_geo", side_effect=geo), patch("app.theme_search_config", (0, {})):
             args = {"name": "search_objects", "theme_id": "test", "args": {"query": "Hübeli"}}
             response = self.api.post("/api/v1/geo", json=args)
             self.assertEqual(response.status_code, 200)
@@ -119,7 +119,8 @@ class ChatTests(unittest.TestCase):
         cases = [
             (address_layer, "Klosterplatz 1 in Solothurn", "klosterplatz 1 solothurn",
              "Klosterplatz 1, 4500 Solothurn (Adresse)"),
-            (object_filters[2], "379 Kappel", "379 Kappel", "GB-Nr: 379 - Kappel [Kappel (SO)] (Proj. Liegenschaft)"),
+            (object_filters[2], "Grundstück Nr. 379 in Kappel", "379 Kappel",
+             "GB-Nr: 379 - Kappel [Kappel (SO)] (Proj. Liegenschaft)"),
             (object_filters[5], "Passwang", "Passwang", "Passwang, Mümliswil-Ramiswil (Geländename)"),
             (object_filters[0], "EGID: 333333", "333333", "EGID: 333333 (Gebäude)"),
         ]
@@ -128,7 +129,7 @@ class ChatTests(unittest.TestCase):
                 body = {"results": [object_hit(source, label)],
                         "result_counts": [{"dataproduct_id": source, "count": 1}]}
                 args = {"name": "search_objects", "theme_id": "test", "args": {"query": query}}
-                with patch("app.object_filters", return_value=[source]), patch("app.get_geo", return_value=body) as geo:
+                with patch("app.object_filters", return_value=object_filters), patch("app.get_geo", return_value=body) as geo:
                     result = self.api.post("/api/v1/geo", json=args).json()
                     self.assertEqual(geo.call_args.args[1]["searchtext"], term)
                     self.assertEqual(result["zoom_ref"], result["candidates"][0]["ref"])
@@ -145,6 +146,7 @@ class ChatTests(unittest.TestCase):
         with patch("app.object_filters", return_value=[address_layer]):
             for phrase, rounds, expected in [
                 (message, [], 502), (message, [matching], 200), (message, [matching, denied], 502),
+                ("Gehe zu Klosterplatz 1 Solothurn", [matching], 200),
                 ("Suche Klosterplatz 1 in Solothurn", [matching], 502),
                 ("Gehe nicht zu Klosterplatz 1 in Solothurn", [matching], 502),
                 ("Gehe zu Bahnhofstrasse 3 in Solothurn", [matching], 502),
@@ -158,6 +160,24 @@ class ChatTests(unittest.TestCase):
                                  httpx.Response(200, json=completion(calls=[
                                      call("search_objects", "search", {"query": "Hübeli"})])))
             self.assertEqual(response.status_code, 200)
+
+    def test_object_and_layer_tool_choice_follow_the_requested_operation(self):
+        lookup = call("search_objects", "search", {"query": "Wasser"})
+        response = httpx.Response(200, json=completion(calls=[lookup]))
+        with patch("app.object_filters", return_value=[address_layer]):
+            for phrase, status in [
+                ("Suche nach dem Layer Wasser", 502),
+                ("Suche im Layer Wasser", 502),
+                ("Gehe zu Wasser, wo es kartiert ist", 200),
+            ]:
+                self.requests.clear()
+                self.assertEqual(self.send({"message": phrase, "theme_id": "default"}, response).status_code, status)
+            self.requests.clear()
+            phrase = "Gehe zu Solothurn und prüfe den Gewässerschutz am Klosterplatz 1"
+            point = call("query_features", "point", {"dataset_id": "water", "easting": 2607000, "northing": 1228500})
+            response = self.send({"message": phrase, "theme_id": "default", "rounds": [step(lookup)]},
+                                 httpx.Response(200, json=completion(calls=[point])))
+            self.assertEqual(response.status_code, 502)
 
     def test_chat_debug_keeps_browser_and_stdout_payload_permissions_separate(self):
         token = "test-infomaniak-secret"
