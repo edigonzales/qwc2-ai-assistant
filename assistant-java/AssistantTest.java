@@ -124,6 +124,11 @@ public class AssistantTest {
 
     private void httpContract() throws Exception {
         eq(compare("/healthz", null, null).json(), obj("status", "UP"));
+        for (URI server : pythonServer == null ? List.of(javaServer) : List.of(javaServer, pythonServer)) {
+            eq(healthWithHost(server, "LOCALHOST:8085"), 200);
+            eq(healthWithHost(server, "localhost:bad"), 400);
+            eq(healthWithHost(server, "example.invalid"), 400);
+        }
         for (String bad : List.of("{", "{} {}", "{\"message\":\"hi\",}", "{\"message\":\"hi\" \"pending\":[]}",
                 "{\"message\":null}", "{\"unknown\":true}", "{\"history\":null,\"message\":\"hi\"}")) {
             error(compare(CHAT, bad, "application/json"), 400, "invalidConversation");
@@ -460,6 +465,15 @@ public class AssistantTest {
                     + "Content-Length: 100\r\n\r\n{").getBytes(UTF_8));
             var input = new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(), UTF_8));
             if (!input.readLine().contains(" 408 ")) throw new AssertionError("Expected HTTP 408");
+        }
+    }
+
+    private static int healthWithHost(URI server, String host) throws IOException {
+        try (var socket = new Socket("127.0.0.1", server.getPort())) {
+            socket.setSoTimeout(3000);
+            socket.getOutputStream().write(("GET /healthz HTTP/1.1\r\nHost: " + host + "\r\n\r\n").getBytes(UTF_8));
+            var input = new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(), UTF_8));
+            return Integer.parseInt(input.readLine().split(" ", 3)[1]);
         }
     }
 

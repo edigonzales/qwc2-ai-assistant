@@ -59,6 +59,8 @@ public class Assistant {
     private static final String CHAT = "/api/v1/chat";
     private static final String GEO = "/api/v1/geo";
     private static final Map<String, String> METHODS = Map.of("/healthz", "GET", CHAT, "POST", GEO, "POST");
+    private static final Pattern HOST = Pattern.compile("(?:127\\.0\\.0\\.1|localhost|assistant)(?::[0-9]+)?",
+            Pattern.CASE_INSENSITIVE);
 
     private static final Map<String, Object> DEFINITION = resource("tools.json");
     private static final List<Object> TOOLS = list(DEFINITION.get("tools"));
@@ -166,7 +168,7 @@ public class Assistant {
         try (exchange) {
             try {
                 Map<String, Object> response;
-                if (host != null && !Set.of("127.0.0.1", "localhost", "assistant").contains(host.split(":", 2)[0])) {
+                if (host == null || !HOST.matcher(host).matches()) {
                     status = 400;
                     write(exchange, status, "text/plain; charset=utf-8", "Invalid host header");
                     return;
