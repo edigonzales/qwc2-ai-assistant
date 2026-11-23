@@ -28,6 +28,8 @@ import java.net.http.HttpTimeoutException;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.regex.Pattern;
@@ -61,6 +63,8 @@ public class Assistant {
     private static final Map<String, String> METHODS = Map.of("/healthz", "GET", CHAT, "POST", GEO, "POST");
     private static final Pattern HOST = Pattern.compile("(?:127\\.0\\.0\\.1|localhost|assistant)(?::[0-9]+)?",
             Pattern.CASE_INSENSITIVE);
+    private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter
+            .ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSxxx", Locale.ROOT).withZone(ZoneOffset.UTC);
 
     private static final Map<String, Object> DEFINITION = resource("tools.json");
     private static final List<Object> TOOLS = list(DEFINITION.get("tools"));
@@ -324,7 +328,8 @@ public class Assistant {
             } catch (Failure e) {
                 filters = List.of();
             }
-            system += OBJECT_PROMPT + "\nConfigured object search filters (IDs): " + JSON.toJson(filters);
+            system += OBJECT_PROMPT + "\nConfigured object search filters (IDs): ["
+                    + String.join(", ", filters.stream().map(JSON::toJson).toList()) + "]";
         }
         if (first) system += "\nIn this round declare_intents must be the first tool call.";
         messages.getFirst().put("content", system);
@@ -920,7 +925,7 @@ public class Assistant {
 
         void finish(int status) {
             if (status >= 500) event.putIfAbsent("error", "internalError");
-            event.putAll(obj("timestamp", Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS).toString(),
+            event.putAll(obj("timestamp", TIMESTAMP.format(Instant.now()),
                     "status", status, "duration_ms", elapsed(start)));
             if (logPayload && preview != null) event.put("payload", preview);
             System.out.println(JSON.toJson(redact(event)));
@@ -1072,6 +1077,7 @@ public class Assistant {
             A group can be shown as a map layer. A facade appears as one layer. Neither is a Data Service
             dataset. Use get_layer_details for the map description. Drawing a layer and querying its data
             are independent.
+
             For a thematic map search, use short German terms. Search the main word from the question
             first and simplify longer terms, e.g. Hochwasser instead of Hochwassergefahr or Strassenlärm
             instead of Strassenverkehrslärm. Search separate topics separately. If you also search a
@@ -1115,6 +1121,5 @@ public class Assistant {
             pick a visible result or supply a qualifier in a reply. For ambiguous
             parcels name the districts from the labels, e.g. «Gehe zu Grundstück 123 in Messen im
             Grundbuchkreis Brunnenthal», then search 123 Brunnenthal Messen.
-
             """;
 }

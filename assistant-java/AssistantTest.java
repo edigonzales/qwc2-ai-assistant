@@ -24,8 +24,11 @@ public class AssistantTest {
     private static final String CHAT = "/api/v1/chat";
     private static final String GEO = "/api/v1/geo";
     private static final String PARCEL = "ch.so.agi.av.grundstuecke.rechtskraeftig";
+    private static final String PROJECTED = "ch.so.agi.av.grundstuecke.projektierte";
     private static final String ADDRESS = Geo.ADDRESS_LAYER;
     private static final String BUILDING = "ch.so.agi.av.bodenbedeckung";
+    private static final String TERRAIN = "ch.so.agi.av.nomenklatur.gelaendenamen";
+    private static final String MUNICIPALITY = "ch.so.agi.gemeindegrenzen";
     private static final String DATASET = "ch.so.afu.gewaesserschutz.bereiche";
     private static final String LAYER = "ch.so.afu.altlasten.standorte";
     private static final String REF = "a".repeat(32);
@@ -292,7 +295,7 @@ public class AssistantTest {
                 return new Reply(200, themes());
             }
             var query = query(request);
-            eq(query.get("filter"), String.join(",", PARCEL, ADDRESS, BUILDING));
+            eq(query.get("filter"), String.join(",", PARCEL, ADDRESS, BUILDING, PROJECTED, TERRAIN, MUNICIPALITY));
             eq(query.get("limit"), "25");
             eq(query.get("searchtext"), "Hübeli");
             return new Reply(200, obj("results", List.of(), "result_counts", List.of()));
@@ -302,6 +305,10 @@ public class AssistantTest {
         eq(themeReads - count, pythonServer == null ? 1 : 2);
         for (String forbidden : List.of("foreground", "not.configured")) error(objects("2084", forbidden), 400, "invalidTool");
         error(post(GEO, obj("name", "search_objects", "theme_id", "bad", "args", obj("query", "2084"))), 503, "locationUnavailable");
+        model(completion(null, declaration()));
+        eq(post(CHAT, obj("message", "Guten Tag", "theme_id", "test")).status, 200);
+        String prompt = Assistant.string(Assistant.object(Assistant.list(modelRequest.get("messages")).getFirst()), "content");
+        eq(prompt.endsWith("\"" + MUNICIPALITY + "\"]\nIn this round declare_intents must be the first tool call."), true);
     }
 
     private void objects() throws Exception {
@@ -326,6 +333,14 @@ public class AssistantTest {
         zoomable(objects("Klosterplatz 1 in Solothurn", ADDRESS).json(), true);
         objectFixture("333333", BUILDING, 1, hit(BUILDING, "EGID: 333333 (Gebäude)", BOX));
         zoomable(objects("EGID: 333333", BUILDING).json(), true);
+        objectFixture("379 Kappel", PROJECTED, 1, "Proj. Liegenschaft",
+                hit(PROJECTED, "GB-Nr: 379 - Kappel [Kappel (SO)] (Proj. Liegenschaft)", BOX));
+        zoomable(objects("Grundstück Nr. 379 in Kappel", PROJECTED).json(), true);
+        objectFixture("Passwang", TERRAIN, 1, "Geländename",
+                hit(TERRAIN, "Passwang, Mümliswil-Ramiswil (Geländename)", BOX));
+        zoomable(objects("Passwang", TERRAIN).json(), true);
+        objectFixture("Gemeinde Olten", MUNICIPALITY, 1, "Gemeinde", hit(MUNICIPALITY, "Olten | 2581 (Gemeinde)", BOX));
+        zoomable(objects("Gemeinde Olten", MUNICIPALITY).json(), true);
         Object[] many = new Object[26];
         Arrays.fill(many, hit(BUILDING, "EGID: 333333 (Gebäude)", BOX));
         objectFixture("333333", BUILDING, 26, many);
@@ -404,6 +419,7 @@ public class AssistantTest {
             System.setOut(captured);
             debug = request(javaServer, CHAT, Assistant.JSON.toJson(obj("message", "Private fixture " + TOKEN)),
                     "application/json", DEBUG);
+            for (int i = 0; stdout.size() == 0 && i < 100; i++) Thread.sleep(5);
         } finally {
             System.setOut(original);
         }
@@ -412,6 +428,8 @@ public class AssistantTest {
         eq(output.get("turn_id"), TURN);
         eq(output.get("round"), 1L);
         String preview = Assistant.string(Assistant.object(output.get("payload")), "json");
+        String timestamp = Assistant.string(Assistant.parse(stdout.toByteArray()), "timestamp");
+        eq(timestamp.matches("[0-9-]+T[0-9:]+\\.[0-9]{3}\\+00:00"), true);
         if (!preview.contains("Private fixture [redacted]") || preview.contains(TOKEN)
                 || stdout.toString(UTF_8).contains("Private fixture") || stdout.toString(UTF_8).contains(TOKEN)) {
             throw new AssertionError("Wrong diagnostic permissions or redaction");
@@ -504,17 +522,21 @@ public class AssistantTest {
     }
 
     private void objectFixture(String term, String source, int count, Object... hits) {
+        objectFixture(term, source, count, "Objekt", hits);
+    }
+
+    private void objectFixture(String term, String source, int count, String category, Object... hits) {
         geo = request -> {
             if (request.getRequestURI().getPath().equals("/map/themes.json")) return new Reply(200, themes());
             eq(request.getRequestURI().getPath(), "/api/search/v2/");
             eq(query(request).get("searchtext"), term);
             return new Reply(200, obj("results", List.of(hits),
-                    "result_counts", List.of(obj("dataproduct_id", source, "count", count, "filterword", "Objekt"))));
+                    "result_counts", List.of(obj("dataproduct_id", source, "count", count, "filterword", category))));
         };
     }
 
     private static Object themes() {
-        var values = List.of("foreground", PARCEL, ADDRESS, BUILDING, PARCEL);
+        var values = List.of("foreground", PARCEL, ADDRESS, BUILDING, PARCEL, PROJECTED, TERRAIN, MUNICIPALITY);
         var provider = obj("provider", "fulltext", "params", obj("default", values));
         return obj("themes", obj("groups", List.of(obj("subdirs", List.of(obj("items",
                 List.of(obj("id", "test", "searchProviders", List.of(provider)))))))));
@@ -542,9 +564,15 @@ public class AssistantTest {
     private Reply compare(String path, String body, String media) throws Exception {
         var first = request(javaServer, path, body, media, Map.of());
         if (pythonServer != null) {
+            var sent = modelRequest;
             var reference = request(pythonServer, path, body, media, Map.of());
             eq(first.status, reference.status);
             eq(canonical(first.body), canonical(reference.body));
+            if (sent != modelRequest && sent != null) {
+                eq(Assistant.list(sent.get("messages")).getFirst(), Assistant.list(modelRequest.get("messages")).getFirst());
+                eq(sent.get("tools"), modelRequest.get("tools"));
+                eq(sent.get("tool_choice"), modelRequest.get("tool_choice"));
+            }
             compared++;
         }
         return first;
