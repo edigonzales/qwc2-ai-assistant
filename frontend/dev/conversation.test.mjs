@@ -16,7 +16,7 @@ const previous = [{id: 'layer.one', title: 'Eins'}, {id: 'layer.two', title: 'Zw
 
 test('numbered follow-up correlates the exact result and rejects the wrong past ID', async() => {
     const steps = [
-        reply(null, declare(scope('get_layer_details', 'Ebene 2', {layer_result_number: 2})), call('call_1', 'add_layer', {id: 'layer.one'}), call('call_2', 'get_layer_details', {id: 'layer.two'}),
+        reply(null, declare(scope('get_layer_details', 'Ebene 2', {layer_result_number: 2})), call('call_1', 'get_layer_details', {id: 'layer.one'}), call('call_2', 'get_layer_details', {id: 'layer.two'}),
             call('call_3', 'search_layers', {query: 'Zwei'})),
         reply('Zwei')
     ];
@@ -97,37 +97,26 @@ test('only a successful search-only presentation ends the turn without another r
     }
 });
 
-test('a visible QWC name cannot substitute for a catalog ID', async() => {
+test('layer removal uses the catalog ID returned by its own search', async() => {
     const steps = [
-        reply(null, declare(scope('remove_layer', 'sichtbaren Layer')), call('v', 'get_visible_layers'),
-            call('r', 'remove_layer', {id: 'qwc.alias'})),
-        reply(null, call('s', 'search_layers', {query: 'QWC-Titel'})),
+        reply(null, declare(scope('remove_layer', 'sichtbaren Layer')),
+            call('s', 'search_layers', {query: 'QWC-Titel'})),
         reply(null, call('c', 'remove_layer', {id: 'catalog.id'})),
         reply('Layer entfernt.')
     ];
-    const executed = [];
     const confirmations = [];
     const turn = await runConversation({
         message: 'Entferne den sichtbaren Layer', history: [], lastResults: [],
         onAction: (name, data) => confirmations.push([name, data]),
-        fetchImpl: (_url, options) => {
-            if (steps.length === 3) {
-                assert.deepEqual(JSON.parse(options.body).rounds[0].results[2], {
-                    tool_call_id: 'r', content: '{"ok":false,"error":"unknownCandidate"}'
-                });
-            }
-            return steps.shift();
-        },
+        fetchImpl: () => steps.shift(),
         runTool: (name, args) => {
-            if (name === 'get_visible_layers') return {layers: [{qwcLayerName: 'qwc.alias', title: 'QWC-Titel'}]};
             if (name === 'search_layers') return {layers: [{id: 'catalog.id', title: 'QWC-Titel'}]};
-            executed.push(args.id);
+            assert.equal(args.id, 'catalog.id');
             return {removed: true};
         }
     });
-    assert.deepEqual(executed, ['catalog.id']);
     assert.deepEqual(confirmations, [['remove_layer', {removed: true}]]);
-    assert.deepEqual(turn.errors, ['unknownCandidate']);
+    assert.deepEqual(turn.errors, []);
 });
 
 test('a layer details 404 remains visible alongside a verified removal in the same batch', async() => {
@@ -157,8 +146,8 @@ test('the browser stops before executing a fourth-round or excess batch', async(
     await assert.rejects(runConversation({
         message: 'Kartenstatus', history: [], lastResults: [],
         fetchImpl: () => ++requests === 1 ?
-            reply(null, declare(scope('get_map_state', 'Kartenstatus')), call('c1', 'get_map_state')) :
-            reply(null, call('c' + requests, 'get_map_state')),
+            reply(null, declare(scope('search_objects', 'Kartenstatus')), call('c1', 'search_objects', {query: 'Kartenstatus'})) :
+            reply(null, call('c' + requests, 'search_objects', {query: 'Kartenstatus'})),
         runTool: () => { ++executed; return {}; }
     }), {message: 'chatLimit'});
     assert.equal(requests, limits.rounds);

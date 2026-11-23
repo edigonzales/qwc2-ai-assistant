@@ -269,9 +269,11 @@ class ChatTests(unittest.TestCase):
         resumed = declare(("zoom_to_result", "Grundstück 2084 in Solothurn Altstadt", {"resume": 1}))
         self.requests.clear()
         response = self.send(followup, httpx.Response(200, json=completion(calls=[
-            resumed, call("search_objects", "object", {"query": "2084 Altstadt Solothurn"})
+            resumed, call("search_objects", "object", {"query": "2084 Solothurn"})
         ])))
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.json()["assistant"]["tool_calls"][1]["function"]["arguments"])["query"],
+                         "2084 Solothurn altstadt")
         lookup = call("search_objects", "object", {"query": "2084 Altstadt Solothurn"})
         followup["rounds"] = [step(resumed, lookup, object={"query": "2084 Altstadt Solothurn", "zoom_ref": ref})]
         self.requests.clear()
@@ -295,6 +297,17 @@ class ChatTests(unittest.TestCase):
         ])))
         self.assertEqual(response.status_code, 502)
         self.assertEqual([t["function"]["name"] for t in self.requests[0]["tools"]], ["search_objects"])
+
+    def test_pending_action_can_need_clarification_before_its_first_read(self):
+        declaration = declare(("add_layer", "ch.so.kbs"), ("zoom_to_result", "meinem Grundstück"))
+        add = call("add_layer", "add", {"id": "ch.so.kbs"})
+        response = self.send({"message": "Lade ch.so.kbs und gehe zu meinem Grundstück.",
+                              "rounds": [step(declaration, add)]},
+                             httpx.Response(200, json=completion("Welche Grundstücksnummer und Gemeinde?")))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["pending"], [
+            {"goal": "zoom_to_result", "target": "meinem Grundstück", "source_intent": 2}
+        ])
 
     def test_address_and_dataset_evidence_is_scoped_to_the_feature_query(self):
         message = "Was gilt am Klosterplatz 1 in Solothurn?"

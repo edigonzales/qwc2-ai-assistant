@@ -33,7 +33,7 @@ goal_tools = {
     "zoom_to_result": ("search_objects",),
     "zoom_to_lv95": (),
     "add_layer": ("search_layers",),
-    "remove_layer": ("search_layers", "get_visible_layers"),
+    "remove_layer": ("search_layers",),
     "get_layer_details": ("search_layers",),
     "get_map_state": (),
     "get_visible_layers": (),
@@ -129,6 +129,7 @@ Do not substitute a point for the full geometry of a parcel or other area.
 For a numbered follow-up, use the exact ID at that position of the latest presented list.
 Address and parcel numbers are not numbered map results.
 Use get_layer_details for metadata, add_layer to show it, and remove_layer to remove it.
+Resolve layer names with search_layers for both showing and removing. QWC names are not catalog IDs.
 Keep that list intact unless the user explicitly asks for a new search. Describe only
 metadata that the tool returned; do not infer group members from a group title.
 For LV95 use the requested easting, northing and scale, and report the actual scale returned.
@@ -244,9 +245,9 @@ def check_calls(chat, calls, used_ids, intents, evidence):
         if call.id in used_ids or not schema or not valid(args, schema):
             raise ValueError("invalid tool call")
         used_ids.add(call.id)
-        args_for.append((name, args))
+        args_for.append((call, args))
     if intents is None:
-        if not args_for or args_for[0][0] != intent_tool:
+        if not args_for or args_for[0][0].function.name != intent_tool:
             raise ValueError("missing intent declaration")
         intents = args_for.pop(0)[1]["intents"]
         resumed = set()
@@ -279,7 +280,8 @@ def check_calls(chat, calls, used_ids, intents, evidence):
             ):
                 raise ValueError("unsupported intent target")
     completed = set()
-    for name, args in args_for:
+    for call, args in args_for:
+        name = call.function.name
         if name == intent_tool or args["intent"] > len(intents):
             raise ValueError("undeclared tool intent")
         index = args["intent"]
@@ -293,11 +295,21 @@ def check_calls(chat, calls, used_ids, intents, evidence):
             raise ValueError("intent already attempted")
         if name == goal and name not in search_tools:
             completed.add(index)
+        if name == "search_objects" and "resume" in intent:
+            prior_words = set(object_words(chat.pending[intent["resume"] - 1].target).split())
+            new_words = list(dict.fromkeys(word for word in object_words(intent["target"]).split()
+                                           if word not in prior_words))
+            if new_words and not set(new_words).intersection(object_words(args["query"]).split()):
+                args["query"] = " ".join([args["query"], *new_words])
+                if not valid(args, chat_schemas[name]):
+                    raise ValueError("refined search exceeds argument limits")
+                call.function.arguments = json.dumps(args, ensure_ascii=False)
         check_evidence(chat, intent, name, args, previous)
-    return intents, sum(name in search_tools for name, _ in args_for)
+    return intents, sum(call.function.name in search_tools for call, _ in args_for)
 
 
 layer_id_tools = {"add_layer", "remove_layer", "get_layer_details"}
+map_actions = {"add_layer", "remove_layer", "zoom_to_result", "zoom_to_lv95"}
 
 
 def outcome(evidence, tool):
@@ -415,11 +427,12 @@ def pending_intents(chat, intents, evidence):
         observed = evidence.get(index, {})
         if goal in observed:
             continue
-        if not observed or goal == "present_layer_results" and outcome(observed, "search_layers"):
+        if (not observed and goal not in map_actions
+                or goal == "present_layer_results" and outcome(observed, "search_layers")):
             raise ValueError("unfinished intent")
         if goal == "zoom_to_result" and zoom_reference(intent, observed):
             raise ValueError("verified zoom was not attempted")
-        if any(result.get("ok") for results in observed.values() for result in results):
+        if not observed or any(result.get("ok") for results in observed.values() for result in results):
             pending.append({"goal": goal, "target": intent["target"], "source_intent": index})
     return pending[:limits["calls"]]
 
