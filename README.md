@@ -13,6 +13,9 @@ führt Kartenaktionen aus und lädt Legenden und Objektinformationen über
 seine gewohnten Dienste. Der Chatverlauf lebt im Browser und wird beim
 Neuladen verworfen.
 
+Ein experimenteller Java-25-Klon steht parallel zu FastAPI zur Verfügung.
+[Java-Start und Prüfungen](assistant-java/README.md)
+
 ## Architektur
 
 ```mermaid
