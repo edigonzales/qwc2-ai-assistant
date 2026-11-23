@@ -115,6 +115,24 @@ class ChatTests(unittest.TestCase):
             self.assertIsNone(result["candidates"][0]["bbox"])
             self.assertIsNone(result["zoom_ref"])
 
+    def test_object_names_follow_the_published_label_formats(self):
+        cases = [
+            (address_layer, "Klosterplatz 1 in Solothurn", "klosterplatz 1 solothurn",
+             "Klosterplatz 1, 4500 Solothurn (Adresse)"),
+            (object_filters[2], "379 Kappel", "379 Kappel", "GB-Nr: 379 - Kappel [Kappel (SO)] (Proj. Liegenschaft)"),
+            (object_filters[5], "Passwang", "Passwang", "Passwang, Mümliswil-Ramiswil (Geländename)"),
+            (object_filters[0], "EGID: 333333", "333333", "EGID: 333333 (Gebäude)"),
+        ]
+        for source, query, term, label in cases:
+            with self.subTest(query=query):
+                body = {"results": [object_hit(source, label)],
+                        "result_counts": [{"dataproduct_id": source, "count": 1}]}
+                args = {"name": "search_objects", "theme_id": "test", "args": {"query": query}}
+                with patch("app.object_filters", return_value=[source]), patch("app.get_geo", return_value=body) as geo:
+                    result = self.api.post("/api/v1/geo", json=args).json()
+                    self.assertEqual(geo.call_args.args[1]["searchtext"], term)
+                    self.assertEqual(result["zoom_ref"], result["candidates"][0]["ref"])
+
     def test_zoom_needs_explicit_navigation_and_latest_matching_search(self):
         query = "Klosterplatz 1 Solothurn"
         ref = "a" * 32
