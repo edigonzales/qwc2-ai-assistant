@@ -203,3 +203,40 @@ POST je Suchaufruf und die Anzeige der Kartenbestätigungen nach der
 Tool-Schleife. Beide Mermaid-Diagramme wurden in draw.io gerendert und
 visuell geprüft. `git diff --check` war erfolgreich. Die Darstellung im
 GitHub-Renderer und neue Live-Tests lagen ausserhalb des Dokumentationsreviews.
+
+## Experimentelles Java-25-Backend
+
+Basis `8b35a19fd05ca63d4c0d7bc9d7003a27746ed65a` von
+`codex/model-gis-intents`. OpenCode 2.0.28 mit
+`deepseek/deepseek-flash` meldete **PASS** für
+`1ac9feb0197e33a1ae2d6f68e6b11648594dcea5` mit kleineren Befunden.
+`55fb6fdf1f4e390458f648e65e8e438e95b9b7ec` korrigierte den
+`Host`-Abgleich und erhielt **PASS**. Danach wurden System- und Objekt-Prompt,
+Diagnose-Zeitstempel und Tests für veröffentlichte Objektbezeichnungen ergänzt.
+Das abschliessende Review von `670b2a0e743a2b314479f8c947674b5c0916e9fc`
+ergab **PASS** ohne Produktbefunde. Es wiederholte alle 13 Java-Testgruppen
+mit 76 HTTP-Vergleichen.
+Beim ersten Review führte eine Portkollision einmal zu einem unbeabsichtigten
+Modellaufruf über das bestehende FastAPI. Der Reviewer meldete keine Offenlegung
+von Zugangsdaten.
+
+Lokal bestanden 13 Java-Testgruppen mit 76 kontrollierten HTTP-Vergleichen,
+23 Python-Tests und 43 Node-Tests. Eine zusätzliche Warteprobe mit dem
+HTTP-Fixture ergab für beide Backends nach 25 Sekunden
+`504 providerTimeout`. JBang, Fat-JAR, das portable JAR mit aktivem
+Leyden-Cache und das macOS-arm64-Native-Image wurden gestartet.
+Der Test mit den drei Exporten verifizierte Health, fünf Geo-Werkzeuge,
+Intent-Ablehnung, Infomaniak-Tool-Calling und die Chat-Diagnostik.
+
+Im Live-Browser bestätigten LayerTree und QWC-URL den Altlasten-Layer.
+Der Kartenausschnitt umfasste Grundstück 2084 in Solothurn. Bei kontrolliert
+mehrdeutigen Grundstücken blieb der Layer nach der Rückfrage geladen. Nur die
+Objektsuche und der Zoom wurden fortgesetzt. Die Fachabfrage am Klosterplatz 1
+lieferte `Au`. Der negierte Zoom-Befehl erhielt in beiden Backends
+`502 invalidModelResponse` ohne Kartenänderung. Eine hypothetische
+Zoomfrage änderte die Karte ebenfalls nicht.
+
+Live geprüft wurden die genannten Kartenfälle. Lasttests und Native-Builds
+auf anderen Betriebssystemen standen aus. Die dokumentierten Abweichungen
+bei syntaktisch ungültiger Modellantwort und der Java-Grössenbegrenzung
+gelten weiterhin. [Startbefehle und Messwerte](../assistant-java/README.md)
