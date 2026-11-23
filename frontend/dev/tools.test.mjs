@@ -4,6 +4,25 @@ import {test} from 'node:test';
 import {mapLayers} from '../js/plugins/aichat/layers.mjs';
 import {createTurnTools, numberedLayer} from '../js/plugins/aichat/tools.mjs';
 
+test('object zoom consumes only the most recent verified result in this turn', async() => {
+    const first = {ref: 'a'.repeat(32), label: 'Olten', bbox: [2632958, 1240112, 2637054, 1246565]};
+    const second = {ref: 'b'.repeat(32), label: 'Bellach', bbox: [2602821, 1227258, 2605896, 1230355]};
+    const replies = [first, second];
+    const options = {themeId: 'default', map: {zoomObject: object => object.label}, fetchImpl: async(url, request) => {
+        assert.equal(url, '/assistant-api/v1/geo');
+        assert.equal(JSON.parse(request.body).theme_id, 'default');
+        const object = replies.shift();
+        return Response.json({candidates: [object], zoom_ref: object.ref});
+    }};
+    const run = createTurnTools(options);
+    await run('search_objects', {query: 'Olten'});
+    await run('search_objects', {query: 'Bellach'});
+    await assert.rejects(run('zoom_to_result', {result_ref: first.ref}), {message: 'unknownObject'});
+    await assert.rejects(createTurnTools(options)('zoom_to_result', {result_ref: second.ref}), {message: 'unknownObject'});
+    assert.equal(await run('zoom_to_result', {result_ref: second.ref}), 'Bellach');
+    await assert.rejects(run('zoom_to_result', {result_ref: second.ref}), {message: 'unknownObject'});
+});
+
 function row(id, extra = {}) {
     return {
         id, title: 'Layer ' + id, themeTitle: 'Wasser',

@@ -108,22 +108,30 @@ Beispiele für Anfragen:
 
 - «Wo ist meine Karte zentriert und welche thematischen Layer sind sichtbar?»
 - «Suche Karten zu Wasser und Grundwasser im Kanton Solothurn.»
+- «Suche Hübeli.»
+- «Gehe zu Klosterplatz 1 in Solothurn.»
+- «Gehe zum Grundstück 123 in Bellach.»
 - «In welchem Gewässerschutzbereich liegt Klosterplatz 1 in Solothurn?»
 - «Mehr Informationen zu Nummer 2.»
 - «Zeige Nummer 2 auf der Karte.»
 - «Entferne den Layer Gemeindegrenzen.»
 - «Zentriere die Karte auf LV95 2607100 Ost und 1228400 Nord im Massstab 1:10000.»
 
-**Details** liest Metadaten zu einem Treffer. **Anzeigen** schaltet den
-Treffer direkt auf der Karte ein. Die Nummern beziehen sich auf die zuletzt
-angezeigte Liste. QWC2 wählt beim Zentrieren eine unterstützte Zoomstufe.
+**Details** liest die Metadaten eines Kartentreffers. **Anzeigen** schaltet
+einen Layer ein oder zoomt auf einen Objekttreffer. Nummern im Chat beziehen
+sich auf die letzte Layerliste. Die Objektsuche verwendet die Volltextfilter
+des aktuellen Kartenthemas ohne `foreground`. Bei eindeutiger Adresse zoomt
+QWC2 auf ca. 1:1000, bei Grundstücken auf den ganzen Suchausschnitt.
+Bei mehreren Treffern kannst du einen Eintrag direkt auswählen oder den
+Befehl mit Ort, Objektart oder Grundbuchkreis präzisieren.
 Für Kartenänderungen gibt der Server pro Nachricht das zu einem klar
 erkannten Auftrag passende Kartenwerkzeug frei. Die Beispielsätze zeigen
 die unterstützten Formen.
 
 Pro Nachricht sind vier Modellrunden und acht Tool-Aufrufe möglich.
-Davon sind höchstens drei kantonale Kartenabfragen mit je bis zu 20 Kandidaten
-zulässig. Das Modell sortiert bis zu 40 eindeutige Kandidaten und kann bis zu
+Davon sind höchstens drei Karten- oder Objektsuchen zulässig.
+Die Objektsuche liefert bis zu 25 Treffer pro Aufruf. Bei der Kartensuche
+sortiert das Modell bis zu 40 eindeutige Kandidaten und kann bis zu
 zehn davon anzeigen. Der Browser prüft die IDs gegen die aktuellen Treffer.
 Bei einer reinen Kartensuche endet der Zug mit der erfolgreichen Präsentation
 der Liste. Eine Suchwiederholung bei leeren Treffern kann eine zusätzliche

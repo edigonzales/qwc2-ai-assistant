@@ -2,14 +2,14 @@ import {createDiagnostics} from './diagnostics.mjs';
 import {limits, locationOrdinalPrefix, numberedLayer, ordinalPattern} from './tools.mjs';
 
 const idTools = new Set(['add_layer', 'remove_layer', 'get_layer_details']);
-const mapActions = new Set(['add_layer', 'remove_layer', 'zoom_to_lv95']);
+const mapActions = new Set(['add_layer', 'remove_layer', 'zoom_to_lv95', 'zoom_to_result']);
 const locationPrefix = new RegExp(locationOrdinalPrefix, 'i');
 
 export function errorCode(error, fallback = 'chatFailed') {
     return /^[a-z][A-Za-z0-9]{0,59}$/.test(error?.message || '') ? error.message : fallback;
 }
 
-export async function runConversation({message, history, lastResults, runTool, signal, diagnostics = createDiagnostics(), onAction = () => {}, fetchImpl = fetch}) {
+export async function runConversation({message, history, lastResults, themeId, runTool, signal, diagnostics = createDiagnostics(), onAction = () => {}, fetchImpl = fetch}) {
     const requestedNumbers = [...message.matchAll(new RegExp(ordinalPattern, 'gi'))]
         .filter(match => !locationPrefix.test(message.slice(0, match.index)));
     const selected = requestedNumbers.length === 1 ? numberedLayer(lastResults, Number(requestedNumbers[0][1])) : null;
@@ -19,6 +19,7 @@ export async function runConversation({message, history, lastResults, runTool, s
     for (const word of message.match(/[A-Za-z0-9_.:-]+/g) || []) knownIds.add(word.replace(/[.:]+$/, ''));
     const payload = {
         message,
+        theme_id: themeId,
         history: history.slice(-limits.historyTurns),
         last_results: lastResults.map(({id, title}) => ({id, title})),
         rounds: []
@@ -66,7 +67,7 @@ export async function runConversation({message, history, lastResults, runTool, s
             if (!assistant.content?.trim()) throw new Error('invalidModelResponse');
             return {assistant: assistant.content.trim(), errors: [...errors]};
         }
-        searches += calls.filter(call => call?.function?.name === 'search_layers').length;
+        searches += calls.filter(call => ['search_layers', 'search_objects'].includes(call?.function?.name)).length;
         if (round + 1 === limits.rounds || callIds.size + calls.length > limits.calls || searches > limits.searches) {
             throw new Error('chatLimit');
         }

@@ -9,7 +9,20 @@ import httpx2 as httpx
 from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
 
-from app import Chat, app, limits, map_command, tool_choice_for as choose_tool
+from app import Chat, address_layer, app, limits, map_command, tool_choice_for as choose_tool
+
+
+object_filters = (
+    "ch.so.agi.av.bodenbedeckung", address_layer, "ch.so.agi.av.grundstuecke.projektierte",
+    "ch.so.agi.av.grundstuecke.rechtskraeftig", "ch.so.agi.av.nomenklatur.flurnamen",
+    "ch.so.agi.av.nomenklatur.gelaendenamen", "ch.so.agi.gemeindegrenzen",
+    "ch.so.agi.gebaeudeadressen.strassenachse_suche",
+)
+
+
+def object_hit(source, label, bbox=None):
+    return {"feature": {"dataproduct_id": source, "display": label, "srid": "EPSG:2056",
+                        "bbox": [2607600, 1228517, 2607700, 1228518] if bbox is None else bbox}}
 
 
 def tool_choice_for(chat):
@@ -57,6 +70,76 @@ class ChatTests(unittest.TestCase):
 
         with patch("app.infomaniak_client", side_effect=client):
             return self.api.post("/api/v1/chat", json=payload, headers=headers)
+
+    def test_object_search_uses_live_theme_scope_and_rejects_other_filters(self):
+        async def geo(path, params, *errors):
+            if path == "/map/themes.json":
+                provider = {"provider": "fulltext", "params": {"default": ["foreground", *object_filters]}}
+                return {"themes": {"groups": [{"items": [{"id": "test", "searchProviders": [provider]}]}]}}
+            self.assertEqual(path, "/api/search/v2/")
+            self.assertEqual(params, {"searchtext": "Hübeli", "filter": ",".join(object_filters), "limit": 25})
+            return {"results": [object_hit(source, "Hübeli (Objekt)") for source in object_filters],
+                    "result_counts": [{"dataproduct_id": source, "count": 1} for source in object_filters]}
+
+        with patch("app.get_geo", side_effect=geo):
+            args = {"name": "search_objects", "theme_id": "test", "args": {"query": "Hübeli"}}
+            response = self.api.post("/api/v1/geo", json=args)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([row["filter"] for row in response.json()["candidates"]], list(object_filters))
+            self.assertIsNone(response.json()["zoom_ref"])
+            for forbidden in ("foreground", "not.configured"):
+                args["args"]["filters"] = [forbidden]
+                self.assertEqual(self.api.post("/api/v1/geo", json=args).status_code, 400)
+
+    def test_exact_parcel_navigation_distinguishes_substrings_ambiguity_and_bad_bounds(self):
+        parcel = object_filters[3]
+        hits = [object_hit(parcel, "GB-Nr: 1123 - Messen (Liegenschaft)"),
+                object_hit(parcel, "GB-Nr: 123 - Messen (Liegenschaft)")]
+        body = {"results": hits, "result_counts": [{"dataproduct_id": parcel, "count": 2}]}
+        args = {"name": "search_objects", "theme_id": "test", "args": {"query": "123 Messen", "filters": [parcel]}}
+        with patch("app.object_filters", return_value=[parcel]), patch("app.get_geo", return_value=body):
+            result = self.api.post("/api/v1/geo", json=args).json()
+            self.assertEqual(len(result["candidates"]), 1)
+            self.assertEqual(result["zoom_ref"], result["candidates"][0]["ref"])
+            body["result_counts"][0]["count"] = -1
+            self.assertIsNone(self.api.post("/api/v1/geo", json=args).json()["zoom_ref"])
+            hits.append(object_hit(parcel, "GB-Nr: 123 - Brunnenthal [Messen] (Liegenschaft)"))
+            body["result_counts"][0]["count"] = 3
+            self.assertIsNone(self.api.post("/api/v1/geo", json=args).json()["zoom_ref"])
+            args["args"]["query"] = "123 Brunnenthal Messen"
+            result = self.api.post("/api/v1/geo", json=args).json()
+            self.assertEqual(len(result["candidates"]), 1)
+            self.assertIsNotNone(result["zoom_ref"])
+            hits[-1]["feature"]["bbox"] = [2607700, 1228517, 2607600, 1228518]
+            result = self.api.post("/api/v1/geo", json=args).json()
+            self.assertIsNone(result["candidates"][0]["bbox"])
+            self.assertIsNone(result["zoom_ref"])
+
+    def test_zoom_needs_explicit_navigation_and_latest_matching_search(self):
+        query = "Klosterplatz 1 Solothurn"
+        ref = "a" * 32
+        reading = call("search_objects", "search", {"query": query})
+        matching = step(reading)
+        matching["results"][0]["content"] = json.dumps({"ok": True, "data": {"query": query, "zoom_ref": ref}})
+        denied = step(call("search_objects", "newer", {"query": query}))
+        message = "Gehe zu Klosterplatz 1 in Solothurn"
+        zoom = call("zoom_to_result", "zoom", {"result_ref": ref})
+        with patch("app.object_filters", return_value=[address_layer]):
+            for phrase, rounds, expected in [
+                (message, [], 502), (message, [matching], 200), (message, [matching, denied], 502),
+                ("Suche Klosterplatz 1 in Solothurn", [matching], 502),
+                ("Gehe nicht zu Klosterplatz 1 in Solothurn", [matching], 502),
+                ("Gehe zu Bahnhofstrasse 3 in Solothurn", [matching], 502),
+            ]:
+                self.requests.clear()
+                response = self.send({"message": phrase, "theme_id": "default", "rounds": rounds},
+                                     httpx.Response(200, json=completion(calls=[zoom])))
+                self.assertEqual(response.status_code, expected, phrase)
+            self.requests.clear()
+            response = self.send({"message": "Suche Hübeli", "theme_id": "default"},
+                                 httpx.Response(200, json=completion(calls=[
+                                     call("search_objects", "search", {"query": "Hübeli"})])))
+            self.assertEqual(response.status_code, 200)
 
     def test_chat_debug_keeps_browser_and_stdout_payload_permissions_separate(self):
         token = "test-infomaniak-secret"

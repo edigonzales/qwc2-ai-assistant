@@ -4,6 +4,7 @@
     "calls": 8,
     "searches": 3,
     "perSearch": 20,
+    "objectResults": 25,
     "candidates": 40,
     "historyTurns": 5,
     "messageLength": 2000,
@@ -14,6 +15,36 @@
   "ordinalPattern": "\\b(?:nummer\\s*|number\\s*|nr\\.?\\s*|(?:layer|ebene)\\s+)([0-9]+)\\b",
   "locationOrdinalPrefix": "\\b(?:grundstück|grundstueck|grundbuch|gb|parzelle|adresse|haus|parcel|plot|property|address|house)\\s*:?\\s*$",
   "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "search_objects",
+        "description": "Find named objects in the normal Solothurn search. Use the name, street and house number, or parcel number and locality, without the command or connecting words. For a specified land registry district use parcel number, district and municipality in that order. Omit filters for a broad search or select only configured filters supported by the request.",
+        "parameters": {
+          "type": "object", "required": ["query"], "additionalProperties": false,
+          "properties": {
+            "query": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "\\S"},
+            "filters": {
+              "type": "array", "maxItems": 25,
+              "items": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "zoom_to_result",
+        "description": "Navigate the open map to the unique verified object match. Use exactly zoom_ref from the latest search_objects response for this turn. Only use when the user requests navigation.",
+        "parameters": {
+          "type": "object", "required": ["result_ref"], "additionalProperties": false,
+          "properties": {
+            "result_ref": {"type": "string", "minLength": 32, "maxLength": 32, "pattern": "^[a-f0-9]{32}$"}
+          }
+        }
+      }
+    },
     {
       "type": "function",
       "function": {

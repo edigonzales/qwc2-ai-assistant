@@ -8,7 +8,7 @@ import LocaleUtils from 'qwc2/utils/LocaleUtils';
 
 import {errorCode, runConversation} from './aichat/conversation.mjs';
 import {createDiagnostics} from './aichat/diagnostics.mjs';
-import {createQwcTurnTools} from './aichat/qwc';
+import {createQwcTurnTools, zoomToObject} from './aichat/qwc';
 import {limits, numberedLayer} from './aichat/tools.mjs';
 
 import './style/AIChat.css';
@@ -33,6 +33,7 @@ function errorLabel(code) {
     case 'numberedSearch': return LocaleUtils.tr('aichat.error.numberedSearch');
     case 'layerUnknown': return LocaleUtils.tr('aichat.error.layerUnknown');
     case 'unknownCandidate': return LocaleUtils.tr('aichat.error.candidate');
+    case 'unknownObject': return LocaleUtils.tr('aichat.error.object');
     case 'layerNotOnMap': return LocaleUtils.tr('aichat.error.layerNotOnMap');
     case 'catalogUnavailable': return LocaleUtils.tr('aichat.error.catalog');
     case 'invalidCatalog': return LocaleUtils.tr('aichat.error.catalogResponse');
@@ -59,6 +60,7 @@ function actionLabel(name, data) {
     case 'add_layer': return LocaleUtils.tr('aichat.layerShown', data.title, data.enabled, data.total);
     case 'remove_layer': return LocaleUtils.tr('aichat.layerRemoved', data.title);
     case 'zoom_to_lv95': return LocaleUtils.tr('aichat.centered', data.center[0], data.center[1], data.scale);
+    case 'zoom_to_result': return LocaleUtils.tr('aichat.objectShown', data.label, data.scale);
     default: return '';
     }
 }
@@ -66,6 +68,7 @@ function actionLabel(name, data) {
 export default function AIChatPlugin() {
     const store = useStore();
     const locale = useSelector(state => state.locale.current);
+    const theme = useSelector(state => state.theme);
     const active = useRef(null);
     const scroll = useRef(null);
     const latest = useRef(null);
@@ -73,6 +76,8 @@ export default function AIChatPlugin() {
     const [input, setInput] = useState('');
     const [turns, setTurns] = useState([]);
     const [results, setResults] = useState([]);
+    const [objectResults, setObjectResults] = useState(null);
+    const [objectNotice, setObjectNotice] = useState(null);
     const [pending, setPending] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
@@ -84,7 +89,7 @@ export default function AIChatPlugin() {
         if (scroll.current && latest.current) {
             scroll.current.scrollTop += latest.current.getBoundingClientRect().top - scroll.current.getBoundingClientRect().top;
         }
-    }, [pending, turns, results]);
+    }, [pending, turns, results, objectResults]);
 
     function cancel() {
         active.current?.abort();
@@ -97,6 +102,8 @@ export default function AIChatPlugin() {
         cancel();
         setTurns([]);
         setResults([]);
+        setObjectResults(null);
+        setObjectNotice(null);
         setInput('');
         setError(null);
         setDetails(null);
@@ -114,16 +121,19 @@ export default function AIChatPlugin() {
         setError(null);
         setNotice(null);
         setPending(message);
+        setObjectNotice(null);
         setBusy(true);
         const confirmations = [];
         try {
             let presented;
+            let objects;
             const runTool = createQwcTurnTools(store, {
-                signal: controller.signal, diagnostics, onResults: rows => { presented = rows; }
+                signal: controller.signal, diagnostics, onResults: rows => { presented = rows; },
+                onObjects: rows => { objects = rows; }
             });
             const history = turns.map(({user, assistant}) => ({user, assistant}));
             const result = await runConversation({
-                message, history, lastResults: results, runTool, signal: controller.signal, diagnostics,
+                message, history, lastResults: results, themeId: theme.current?.id, runTool, signal: controller.signal, diagnostics,
                 onAction: (name, data) => confirmations.push(actionLabel(name, data))
             });
             controller.signal.throwIfAborted();
@@ -140,6 +150,7 @@ export default function AIChatPlugin() {
                 setResults(presented);
                 setDetails(null);
             }
+            if (objects) setObjectResults({theme, rows: objects});
             setError(issue ? {code: issue, partial: confirmations.length > 0} : null);
             diagnostics.record('chat.display', {display: confirmations.length ? 'map_confirmation' : issue ? 'error' : presented ? 'results' : 'model_text',
                 result_count: presented?.length, confirmations: confirmations.length, error: issue});
@@ -157,6 +168,18 @@ export default function AIChatPlugin() {
             }
         } finally {
             if (active.current === controller) cancel();
+        }
+    }
+
+    function showObject(object) {
+        if (active.current || objectResults?.theme !== store.getState().theme) return;
+        setError(null);
+        setObjectNotice(null);
+        try {
+            const result = zoomToObject(store, object);
+            setObjectNotice({ref: object.ref, text: actionLabel('zoom_to_result', result)});
+        } catch (err) {
+            setError({code: errorCode(err, 'toolFailed')});
         }
     }
 
@@ -224,6 +247,23 @@ export default function AIChatPlugin() {
                                 </li>
                             ))}
                         </ol>
+                    ) : null}
+                    {objectResults && objectResults.theme === theme && objectResults.rows.length > 0 ? (
+                        <ul aria-label={LocaleUtils.tr('aichat.objectResults')} className="aichat-results">
+                            {objectResults.rows.map(object => (
+                                <li key={object.ref}>
+                                    <strong>{object.label}</strong>
+                                    {object.bbox ? (
+                                        <div className="aichat-buttons">
+                                            <button className="button" disabled={busy} onClick={() => showObject(object)} type="button">
+                                                {LocaleUtils.tr('aichat.show')}
+                                            </button>
+                                        </div>
+                                    ) : <div className="aichat-theme">{LocaleUtils.tr('aichat.error.geoResponse')}</div>}
+                                    {objectNotice?.ref === object.ref ? <p role="status">{objectNotice.text}</p> : null}
+                                </li>
+                            ))}
+                        </ul>
                     ) : null}
                     {pending ? <p aria-label={LocaleUtils.tr('aichat.you')} className="aichat-user" ref={latest}>{pending}</p> : null}
                 </div>

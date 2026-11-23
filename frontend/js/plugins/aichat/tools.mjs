@@ -40,8 +40,9 @@ export function numberedLayer(results, number) {
     return Number.isInteger(number) && number > 0 ? results[number - 1] ?? null : null;
 }
 
-export function createTurnTools({map, fetchImpl = fetch, signal, diagnostics, onResults = () => {}}) {
+export function createTurnTools({map, fetchImpl = fetch, signal, diagnostics, themeId, onObjects = () => {}, onResults = () => {}}) {
     const candidates = new Map();
+    let objects;
     let calls = 0;
     let searches = 0;
 
@@ -54,7 +55,7 @@ export function createTurnTools({map, fetchImpl = fetch, signal, diagnostics, on
             response = await fetchImpl('/assistant-api/v1/geo', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json', ...diagnostics?.headers(round)},
-                body: JSON.stringify({name, args}),
+                body: JSON.stringify({name, args, ...(name === 'search_objects' ? {theme_id: themeId} : {})}),
                 redirect: 'error',
                 signal: signal ? AbortSignal.any([signal, timeout]) : timeout
             });
@@ -111,6 +112,23 @@ export function createTurnTools({map, fetchImpl = fetch, signal, diagnostics, on
         case 'add_layer': return map.addLayer(await details(args.id, round), signal);
         case 'remove_layer': return map.removeLayer(await details(args.id, round), signal);
         case 'zoom_to_lv95': return map.zoom(args);
+        case 'search_objects': {
+            if (++searches > limits.searches) throw new Error('searchLimit');
+            objects = undefined;
+            const data = await readGeo(name, args, round);
+            map.checkTheme?.(signal);
+            if (!Array.isArray(data?.candidates) || data.candidates.length > limits.objectResults) throw new Error('invalidGeoResponse');
+            objects = data;
+            onObjects(data.candidates);
+            return data;
+        }
+        case 'zoom_to_result': {
+            if (objects?.zoom_ref !== args.result_ref) throw new Error('unknownObject');
+            const object = objects.candidates.find(candidate => candidate.ref === args.result_ref);
+            if (!object) throw new Error('unknownObject');
+            objects = undefined;
+            return map.zoomObject(object);
+        }
         case 'search_layers': return search(args.query, round);
         case 'get_layer_details': return details(args.id, round);
         case 'resolve_location':

@@ -8,6 +8,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Literal
 from urllib.parse import quote
+from uuid import uuid4
 
 import httpx2 as httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -27,7 +28,8 @@ metadata_request = re.compile(
     r"\b(?:informationen|information|infos|details|metadaten|metadata|beschreibung|description|legende|legend)\b",
     re.IGNORECASE
 )
-map_mutations = {"add_layer", "remove_layer", "zoom_to_lv95"}
+map_mutations = {"add_layer", "remove_layer", "zoom_to_lv95", "zoom_to_result"}
+search_tools = {"search_layers", "search_objects"}
 result_number = re.compile(definition["ordinalPattern"])
 location_ordinal_prefix = re.compile(definition["locationOrdinalPrefix"], re.IGNORECASE)
 catalog_id = re.compile(r"\b(?:ch\.[a-z0-9_.:-]+|id\s+[a-z0-9_.:-]+)\b")
@@ -64,6 +66,15 @@ If the user only wants to find maps, call present_layer_results on its own with 
 The UI displays the numbered list and verified count or suggests refining an empty search.
 No final text is needed for this case. If the request needs further tools or an explanation,
 leave search_only false and continue after presentation.
+Use search_objects for named places and objects, e.g. Hübeli, Klosterplatz 1 Solothurn,
+or 123 Bellach. Use only the configured filters given separately. For an explicitly named
+object type narrow to its filters, including both configured parcel filters for an unqualified
+parcel request. Preserve all given name, number, locality and district terms when composing
+the search. Do not invent missing qualifiers. If listing objects, describe the results and
+offer refinement on partial results. The UI presents selectable candidates. For an explicit
+navigation request use zoom_to_result only with the returned zoom_ref. If absent, refine
+using the user's terms or ask which object is meant. For ambiguous parcels name the land
+registry districts from the labels. To refine by district send e.g. 123 Brunnenthal Messen.
 For a factual question about an address, call resolve_location with the street, house number and
 locality. Search for the specific individual layer with search_layers in the same tool batch.
 Use the coordinates of the unique resolved address and the relevant individual layer's actual ID
@@ -123,14 +134,16 @@ class Reference(Payload):
 
 class Chat(Payload):
     message: str = Field(min_length=1, max_length=limits["messageLength"])
+    theme_id: str | None = Field(default=None, min_length=1, max_length=200)
     history: list[Turn] = Field(default_factory=list, max_length=limits["historyTurns"])
     rounds: list[Round] = Field(default_factory=list, max_length=limits["rounds"] - 1)
     last_results: list[Reference] = Field(default_factory=list, max_length=schemas["present_layer_results"]["properties"]["ids"]["maxItems"])
 
 
 class GeoCall(Payload):
-    name: Literal["search_layers", "get_layer_details", "resolve_location", "query_features"]
+    name: Literal["search_layers", "get_layer_details", "resolve_location", "query_features", "search_objects"]
     args: dict
+    theme_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 def valid(value, schema):
@@ -159,7 +172,7 @@ def check_calls(calls, used_ids):
         if (call.id in used_ids or not schema or not valid(json.loads(call.function.arguments), schema)):
             raise ValueError("invalid tool call")
         used_ids.add(call.id)
-    return sum(call.function.name == "search_layers" for call in calls)
+    return sum(call.function.name in search_tools for call in calls)
 
 
 def messages_for(chat):
@@ -204,6 +217,10 @@ def map_command(message):
     if (re.match(r"^(?:zentrier(?:e)?|zoom(?:e)?|center)\b", message) and "lv95" in message
         and len(re.findall(r"\b[0-9]+", message)) >= 3 and re.search(r"massstab|maßstab|scale|1\s*:", message)):
         return "zoom_to_lv95"
+    if re.match(r"^(?:(?:geh(?:e)?|spring(?:e)?)\s+zu(?:m|r)?|go\s+to|"
+                r"(?:zoom(?:e)?|zentrier(?:e)?(?:\s+die\s+karte)?|center(?:\s+the\s+map)?)"
+                r"\s+(?:auf|zu(?:m|r)?|to|on))\s+\S", message):
+        return "zoom_to_result"
     numbered_command = re.fullmatch(definition["ordinalPattern"] + r"\s+(anzeigen|einblenden|entfernen|show|remove)[.!]?", message)
     if numbered_command:
         return "remove_layer" if numbered_command[2] in {"entfernen", "remove"} else "add_layer"
@@ -240,9 +257,28 @@ def resolved_point(chat):
     return None
 
 
+def object_zoom_ref(chat):
+    matches = tool_results(chat, "search_objects")
+    if not matches or matches[-1]["ok"] is not True:
+        return None
+    result = matches[-1]["data"]
+    if not isinstance(result, dict) or not isinstance(result.get("query"), str):
+        return None
+    if not set(object_words(result["query"]).split()) <= set(object_words(chat.message).split()):
+        return None
+    ref = result.get("zoom_ref")
+    return ref if valid(ref, schemas["zoom_to_result"]["properties"]["result_ref"]) else None
+
+
 def tool_choice_for(chat, message, mutation):
     prior_calls = {call.function.name for step in chat.rounds for call in step.calls}
     search_outcomes = tool_results(chat, "search_layers")
+    if mutation == "zoom_to_result":
+        if not chat.rounds:
+            return {"type": "function", "function": {"name": "search_objects"}}
+        if "zoom_to_result" not in prior_calls and object_zoom_ref(chat):
+            return {"type": "function", "function": {"name": "zoom_to_result"}}
+        return "auto"
     if address_question(message):
         if not chat.rounds:
             return "required"
@@ -264,6 +300,8 @@ def tool_choice_for(chat, message, mutation):
     if search_request:
         if not chat.rounds:
             return "required"
+        if "search_objects" in prior_calls and "search_layers" not in prior_calls:
+            return "auto"
         if (len(chat.rounds) == 1 and 0 < len(search_outcomes) < limits["searches"]
                 and all(outcome["ok"] and outcome.get("data") == {"layers": []} for outcome in search_outcomes)):
             return {"type": "function", "function": {"name": "search_layers"}}
@@ -353,6 +391,131 @@ async def get_geo(path, params, unavailable, invalid, missing=None):
     if not isinstance(data, dict):
         raise HTTPException(502, invalid)
     return data
+
+
+async def object_filters(theme_id):
+    if not theme_id:
+        return []
+    try:
+        async with asyncio.timeout(3):
+            data = await get_geo("/map/themes.json", {}, "locationUnavailable", "invalidLocation")
+    except TimeoutError:
+        raise HTTPException(502, "locationUnavailable")
+    pending = [data.get("themes")]
+    while pending:
+        theme = pending.pop()
+        if not isinstance(theme, dict):
+            continue
+        for key in ("groups", "items"):
+            if isinstance(theme.get(key), list):
+                pending.extend(theme[key])
+        if theme.get("id") != theme_id:
+            continue
+        providers = theme.get("searchProviders")
+        if not isinstance(providers, list):
+            return []
+        filters = {}
+        for provider in providers:
+            if isinstance(provider, dict) and provider.get("provider") == "fulltext":
+                params = provider.get("params")
+                defaults = params.get("default") if isinstance(params, dict) else None
+                if isinstance(defaults, list):
+                    filters.update((value, None) for value in defaults if valid(value, id_schema)
+                                   and value not in {"foreground", "dataproduct"})
+        return list(filters)
+    return []
+
+
+def object_words(value):
+    return " ".join(re.findall(r"[^\W_]+", value.casefold()))
+
+
+def parcel_names(label):
+    match = re.fullmatch(r"GB-Nr:\s*(\S+)\s+-\s+([^\[\]]+?)(?:\s*\[([^\]]+)\])?", label)
+    if not match:
+        return set()
+    number, district, municipality = match.groups()
+    # In merged municipalities the label includes both the land registry district and municipality.
+    return {object_words(f"{number} {municipality or district}"),
+            object_words(f"{number} {district} {municipality or ''}")}
+
+
+def object_exact(term, label, source):
+    name = re.sub(r"\s+\([^()]+\)$", "", label)
+    if source == address_layer:
+        requested, actual = address_fields(term), address_fields(name)
+        return bool(requested and actual and requested[3]
+                    and all(not part or part == actual[i] for i, part in enumerate(requested)))
+    if name.startswith("GB-Nr:"):
+        return object_words(term) in parcel_names(name)
+    name = re.sub(r"\s*\|\s*\d{4}\b", " ", name)
+    return object_words(name) == object_words(term)
+
+
+def object_bbox(hit):
+    bbox = hit.get("bbox")
+    coordinates = schemas["query_features"]["properties"]
+    if (hit.get("srid") == "EPSG:2056" and isinstance(bbox, list) and len(bbox) == 4
+            and all(valid(value, coordinates["easting" if i % 2 == 0 else "northing"])
+                    for i, value in enumerate(bbox))
+            and bbox[0] <= bbox[2] and bbox[1] <= bbox[3]):
+        return bbox
+    return None
+
+
+async def search_objects(query, filters=None, *, theme_id=None):
+    defaults = await object_filters(theme_id)
+    if not defaults:
+        raise HTTPException(503, "locationUnavailable")
+    if filters and not set(filters) <= set(defaults):
+        raise HTTPException(400, "invalidTool")
+    selected = list(dict.fromkeys(filters or defaults))
+    term = " ".join(query.replace(",", " ").split())
+    if selected == [address_layer] and (parts := address_fields(term)):
+        term = " ".join(part for part in parts if part)
+    limit = limits["objectResults"]
+    data = await get_geo("/api/search/v2/", {"searchtext": term, "filter": ",".join(selected), "limit": limit},
+                         "locationUnavailable", "invalidLocation")
+    raw, raw_counts = data.get("results"), data.get("result_counts")
+    if not isinstance(raw, list) or not isinstance(raw_counts, list):
+        raise HTTPException(502, "invalidLocation")
+    counts = {}
+    for row in raw_counts:
+        if not isinstance(row, dict):
+            raise HTTPException(502, "invalidLocation")
+        source, count = row.get("dataproduct_id"), row.get("count")
+        if source in selected and type(count) is int:
+            counts[source] = {"filter": source, "type": geo_text(row.get("filterword"), 50), "count": count}
+
+    candidates, seen, exact = [], set(), []
+    returned = dict.fromkeys(selected, 0)
+    for row in raw[:limit]:
+        hit = row.get("feature") if isinstance(row, dict) else None
+        if not isinstance(hit, dict) or (source := hit.get("dataproduct_id")) not in selected:
+            continue
+        returned[source] += 1
+        label = geo_text(hit.get("display"), 160)
+        if not label:
+            raise HTTPException(502, "invalidLocation")
+        matches = object_exact(term, label, source)
+        # The search service returns substrings even for a complete parcel number.
+        if label.startswith("GB-Nr:") and re.match(r"^\d+\s+", term) and not matches:
+            continue
+        bbox = object_bbox(hit)
+        identity = (source, label, tuple(bbox or []))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        ref = uuid4().hex
+        candidates.append({"ref": ref, "label": label, "filter": source,
+                           "type": counts.get(source, {}).get("type", ""), "bbox": bbox})
+        if matches:
+            exact.append(ref if bbox is not None else None)
+    # Some facets report -1 when the limit prevents an exact count.
+    partial = len(raw) > limit or any(counts.get(source, {}).get("count", 0) != amount
+                                      for source, amount in returned.items())
+    return {"query": query, "candidates": candidates, "counts": list(counts.values()), "partial": partial,
+            "zoom_ref": exact[0] if len(exact) == 1 and not partial else None}
 
 
 async def search_layers(query):
@@ -474,9 +637,9 @@ async def query_features(dataset_id, easting, northing):
             "numberReturned": len(features), "partial": number_matched > len(features)}
 
 
-geo_tools = {"search_layers": search_layers, "get_layer_details": get_layer_details,
+geo_tools = {"search_layers": search_layers, "search_objects": search_objects, "get_layer_details": get_layer_details,
              "resolve_location": resolve_location, "query_features": query_features}
-geo_services = {"search_layers": "search", "resolve_location": "search",
+geo_services = {"search_layers": "search", "search_objects": "search", "resolve_location": "search",
                 "get_layer_details": "weblayers", "query_features": "data"}
 
 
@@ -504,14 +667,15 @@ async def geo(request: Request):
             raise ValueError("invalid tool arguments")
     except (ValueError, RecursionError) as exc:
         raise HTTPException(400, "invalidTool") from exc
+    args = {**payload.args, "theme_id": payload.theme_id} if payload.name == "search_objects" else payload.args
     if not request.state.debug:
-        return await geo_tools[payload.name](**payload.args)
+        return await geo_tools[payload.name](**args)
     details = request.state.diagnostic["geo"] = {"tool": payload.name, "service": geo_services[payload.name]}
     start = perf_counter()
     if request.state.log_payload:
         request.state.payload_preview = preview({"arguments": payload.args})
     try:
-        result = await geo_tools[payload.name](**payload.args)
+        result = await geo_tools[payload.name](**args)
     finally:
         details["duration_ms"] = elapsed_ms(start)
     for key in ("layers", "candidates", "features"):
@@ -536,6 +700,19 @@ async def chat(request: Request):
     mutation = map_command(phrase)
     tool_choice = tool_choice_for(payload, phrase, mutation)
     blocked_tools = map_mutations - {mutation}
+    zoom_ref = object_zoom_ref(payload) if mutation == "zoom_to_result" else None
+    if not zoom_ref or tool_results(payload, "zoom_to_result"):
+        blocked_tools.add("zoom_to_result")
+    if payload.theme_id:
+        try:
+            filters = await object_filters(payload.theme_id)
+        except HTTPException:
+            filters = []
+        messages[0]["content"] += "\nConfigured object search filters (IDs): " + json.dumps(filters)
+        if not filters:
+            messages[0]["content"] += " Object search is temporarily unavailable for this map."
+    else:
+        blocked_tools.add("search_objects")
     available_tools = [tool for tool in tools if tool["function"]["name"] not in blocked_tools]
     client, model = infomaniak_client()
     model_options = {"stream": False, "max_tokens": 1600, "temperature": 0.2, "reasoning_effort": "none"}
@@ -595,13 +772,14 @@ async def chat(request: Request):
             raise ValueError("map tool not requested")
         if tool_choice != "auto" and not calls:
             raise ValueError("required tool call missing")
-        factual_address = address_question(phrase)
+        factual_address = mutation != "zoom_to_result" and address_question(phrase)
         if tool_choice == "required":
             names = {call.function.name for call in calls}
             if factual_address:
                 if "resolve_location" not in names or not names <= {"resolve_location", "search_layers"}:
                     raise ValueError("address must be resolved first")
-            elif names != {"search_layers"}:
+            elif (names != {"search_layers"}
+                  and not (payload.theme_id and names == {"search_objects"} and not map_words.search(phrase))):
                 raise ValueError("unexpected search tool")
         if isinstance(tool_choice, dict):
             name = tool_choice["function"]["name"]
@@ -615,6 +793,10 @@ async def chat(request: Request):
                     raise ValueError("invalid read tool arguments")
                 call.function.arguments = "{}"
         searches += check_calls(calls, used_ids)
+        if any(call.function.name == "zoom_to_result" for call in calls) and (
+            len(calls) != 1 or json.loads(calls[0].function.arguments)["result_ref"] != zoom_ref
+        ):
+            raise ValueError("zoom uses an unverified object")
         if factual_address:
             for call in calls:
                 if call.function.name == "query_features":
