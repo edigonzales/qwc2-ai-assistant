@@ -154,3 +154,42 @@ voraus. Bei gekürzten
 Suchantworten sind Eingrenzung und die direkte Auswahl eines sichtbaren
 Treffers möglich. Freie Befehlsvarianten können ausserhalb der erkannten
 ausdrücklichen Navigationsformen liegen.
+
+## Modellgesteuerte GIS-Aufträge
+
+Basis `baf2799124db95384c976eb27b71a148fbde710e`. In einem Chat-Zug kann
+das Modell mehrere GIS-Aufträge deklarieren. Suchnachweise werden dem
+jeweiligen Auftrag zugeordnet. Eine Rückfrage setzt den offenen Auftrag
+mit neuer Suche fort.
+
+Das Erstreview von `b1011e2e6074715d7ad2e1e9299f1e37bec0d91d` mit
+OpenCode 2.0.28 und `deepseek/deepseek-flash` ergab **FAIL**. Eine
+Rückfrage vor dem ersten Suchaufruf ging nach einer erfolgreichen zweiten
+Aktion verloren. Die Korrektur erhält den offenen Auftrag, übernimmt
+zugelassene Angaben aus der Präzisierung in die Suche und bindet die
+Layer-Entfernung an die Katalog-ID.
+Die Nachprüfung von `5a34137b5db456b996e4a318512ae6b91fae5b19` mit
+demselben Modell ergab **PASS**. Sie bestätigte offene Kartenaufträge ohne
+vorherige Suche, den Katalognachweis und die präzisierte Objektsuche.
+Die gezielte Prüfung von `dac72a5f68aa0e790333e7dd0568da2d95719e71`
+ergab **FAIL**, weil ein unversuchter nummerierter Auftrag beim Fortsetzen
+seine Bindung an die Liste verlieren konnte. Die Prüfung des finalen
+Produktcommits `7be0c9dcdd88f0a6fe61833f4a1d175314598868` ergab **PASS**.
+Sie bestätigte den Fehlerfall am Vorgänger und führte 23 Python-Tests aus.
+Die unabhängigen Reviews liefen ohne Live-Dienste.
+
+Lokal bestanden 43 Node- und 23 Python-Tests, gezieltes ESLint,
+Compose-Build und Compose-Konfigurationsprüfung sowie `git diff --check`.
+Chromium lud mit der konfigurierten Inferenz-API und der kantonalen Suche
+im selben Zug den Kataster der belasteten Standorte und zeigte die ganze
+BBOX von Grundstück 2084 in Solothurn. Die freie Bitte um Navigation zum
+Klosterplatz 1 führte zum bestätigten Adresspunkt bei 1:945.
+
+Im kontrollierten Browser-Fall ersetzten zwei simulierte Grundstückstreffer
+die erste Objektantwort für 2084. Der Altlasten-Layer wurde geladen, die
+Karte blieb bis zur Präzisierung stehen und «Altstadt» löste nur eine neue
+Grundstückssuche und den Zoom aus. Das Modell und die Altlasten-Suche liefen
+dabei live. Im Browser wurden auch die Wassersuche, Layer anzeigen und
+wieder entfernen, die Fachantwort `Au` sowie eine verneinte Suche und eine
+hypothetische Zoomfrage ohne Kartenänderung geprüft. Ein früherer Live-Lauf
+hatte beim Formulieren einer Rückfrage einen Timeout der Inferenz-API.
