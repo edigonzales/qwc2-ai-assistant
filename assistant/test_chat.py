@@ -238,6 +238,12 @@ class ChatTests(unittest.TestCase):
                                  call("remove_layer", arguments={"id": "water.one"}),
                              ])))
         self.assertEqual(response.status_code, 200)
+        self.requests.clear()
+        response = self.send({**payload, "rounds": [step(declare(("add_layer", "ch.so.unmentioned",
+                                                                {"layer_result_number": 2})))]},
+                             httpx.Response(200, json=completion("Kannst du das bestätigen?")))
+        self.assertEqual(response.status_code, 502)
+        self.assertNotIn("pending", response.json())
 
     def test_layer_and_object_intents_use_only_their_own_evidence(self):
         message = "Lade den Layer mit den Altlasten und gehe zu Grundstück 2084 in Solothurn."

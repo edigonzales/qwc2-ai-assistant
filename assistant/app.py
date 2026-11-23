@@ -428,7 +428,7 @@ def pending_intents(chat, intents, evidence):
         observed = evidence.get(index, {})
         if goal in observed:
             continue
-        if (not observed and goal not in map_actions
+        if (not observed and (goal not in map_actions or "layer_result_number" in intent)
                 or goal == "present_layer_results" and outcome(observed, "search_layers")):
             raise ValueError("unfinished intent")
         if goal == "zoom_to_result" and zoom_reference(intent, observed):
