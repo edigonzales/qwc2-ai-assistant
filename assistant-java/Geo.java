@@ -3,7 +3,17 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.StringJoiner;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -44,24 +54,36 @@ final class Geo {
     }
 
     Map<String, Object> run(String name, Map<String, Object> args, String theme) {
+        return run(name, args, theme, Assistant.NO_TURN_DEADLINE);
+    }
+
+    Map<String, Object> run(String name, Map<String, Object> args, String theme, long deadlineNanos) {
+        Assistant.requireTime(deadlineNanos);
         return switch (name) {
-            case "search_layers" -> searchLayers(Assistant.string(args, "query"));
-            case "get_layer_details" -> layerDetails(Assistant.string(args, "id"));
-            case "resolve_location" -> resolveLocation(Assistant.string(args, "address"));
-            case "query_features" -> queryFeatures(Assistant.string(args, "dataset_id"), args.get("easting"), args.get("northing"));
-            case "search_objects" -> searchObjects(Assistant.string(args, "query"),
-                    args.containsKey("filters") ? Assistant.list(args.get("filters")) : List.of(), theme);
+            case "search_layers" -> searchLayers(Assistant.string(args, "query"), deadlineNanos);
+            case "get_layer_details" -> layerDetails(Assistant.string(args, "id"), deadlineNanos);
+            case "resolve_location" -> resolveLocation(Assistant.string(args, "address"), deadlineNanos);
+            case "query_features" -> queryFeatures(
+                    Assistant.string(args, "dataset_id"),
+                    args.get("easting"),
+                    args.get("northing"),
+                    deadlineNanos);
+            case "search_objects" -> {
+                var filters = args.containsKey("filters") ? Assistant.list(args.get("filters")) : List.of();
+                yield searchObjects(Assistant.string(args, "query"), filters, theme, deadlineNanos);
+            }
             default -> throw new IllegalArgumentException("Unknown read tool");
         };
     }
 
-    private Map<String, Object> get(String path, Map<String, ?> query, String unavailable, String invalid, String missing, int seconds) {
+    private Map<String, Object> get(String path, Map<String, ?> query, String unavailable, String invalid,
+                                    String missing, int seconds, long deadlineNanos) {
         var params = new StringJoiner("&");
         query.forEach((key, value) -> params.add(key + "=" + URLEncoder.encode(value.toString(), UTF_8)));
         var uri = origin.resolve(path + (params.length() == 0 ? "" : "?" + params));
         var request = HttpRequest.newBuilder(uri).header("Accept", "application/json").GET().build();
         try {
-            var response = Assistant.send(client, request, 6, seconds, 4 * 1024 * 1024);
+            var response = Assistant.send(client, request, 6, seconds, 4 * 1024 * 1024, deadlineNanos);
             if (response.status() == 404 && missing != null) throw new Assistant.Failure(404, missing);
             if (response.status() < 200 || response.status() >= 300) throw new Assistant.Failure(502, unavailable);
             return Assistant.parse(response.body());
@@ -72,13 +94,16 @@ final class Geo {
         }
     }
 
-    List<String> filters(String theme) {
-        if (theme == null) return List.of();
+    List<String> filters(String theme, long deadlineNanos) {
+        Assistant.requireTime(deadlineNanos);
+        if (theme == null || theme.isEmpty()) {
+            return List.of();
+        }
         var current = cache;
         if (current != null && System.nanoTime() - current.time < 30_000_000_000L) {
             return current.values.getOrDefault(theme, List.of());
         }
-        var config = get("/map/themes.json", Map.of(), "locationUnavailable", "invalidLocation", null, 3);
+        var config = get("/map/themes.json", Map.of(), "locationUnavailable", "invalidLocation", null, 3, deadlineNanos);
         var byTheme = new HashMap<String, List<String>>();
         var pending = new ArrayList<>();
         pending.add(config.get("themes"));
@@ -88,14 +113,14 @@ final class Geo {
                 if (node.get(key) instanceof List<?> items) pending.addAll(items);
             }
             var id = node.get("id");
-            if (!Assistant.valid(id, Assistant.ID_SCHEMA) || !(node.get("searchProviders") instanceof List<?> providers)) continue;
+            if (!Schemas.valid(id, Schemas.CATALOG_ID) || !(node.get("searchProviders") instanceof List<?> providers)) continue;
             var filters = new LinkedHashSet<String>();
             for (Object raw : providers) {
                 var provider = Assistant.objectOrEmpty(raw);
                 if (!"fulltext".equals(provider.get("provider"))) continue;
                 if (Assistant.objectOrEmpty(provider.get("params")).get("default") instanceof List<?> defaults) {
                     for (Object filter : defaults) {
-                        if (Assistant.valid(filter, Assistant.ID_SCHEMA) && !"foreground".equals(filter)) filters.add((String) filter);
+                        if (Schemas.valid(filter, Schemas.CATALOG_ID) && !"foreground".equals(filter)) filters.add((String) filter);
                     }
                 }
             }
@@ -105,15 +130,15 @@ final class Geo {
         return byTheme.getOrDefault(theme, List.of());
     }
 
-    private Map<String, Object> searchObjects(String query, List<Object> filters, String theme) {
-        var defaults = filters(theme);
+    private Map<String, Object> searchObjects(String query, List<Object> filters, String theme, long deadlineNanos) {
+        var defaults = filters(theme, deadlineNanos);
         if (defaults.isEmpty()) throw new Assistant.Failure(503, "locationUnavailable");
         if (!defaults.containsAll(filters)) throw new Assistant.Failure(400, "invalidTool");
         var selected = filters.isEmpty() ? defaults : filters.stream().map(String.class::cast).distinct().toList();
         String term = objectSearchText(query, selected);
-        int limit = Assistant.limit("objectResults");
+        int limit = Schemas.MAX_OBJECT_RESULTS;
         var data = get(SEARCH, Map.of("searchtext", term, "filter", String.join(",", selected), "limit", limit),
-                "locationUnavailable", "invalidLocation", null, 9);
+                "locationUnavailable", "invalidLocation", null, 9, deadlineNanos);
         if (!(data.get("results") instanceof List<?> raw) || !(data.get("result_counts") instanceof List<?> rawCounts)) {
             throw new Assistant.Failure(502, "invalidLocation");
         }
@@ -219,18 +244,18 @@ final class Geo {
     private static List<?> bbox(Map<String, Object> hit) {
         if (!"EPSG:2056".equals(hit.get("srid")) || !(hit.get("bbox") instanceof List<?> bounds) || bounds.size() != 4) return null;
         for (int i = 0; i < bounds.size(); i++) {
-            var schema = Assistant.object(Assistant.COORDINATES.get(i % 2 == 0 ? "easting" : "northing"));
-            if (!Assistant.valid(bounds.get(i), schema)) return null;
+            var schema = i % 2 == 0 ? Schemas.EASTING : Schemas.NORTHING;
+            if (!Schemas.valid(bounds.get(i), schema)) return null;
         }
         if (((Number) bounds.get(0)).doubleValue() > ((Number) bounds.get(2)).doubleValue()
                 || ((Number) bounds.get(1)).doubleValue() > ((Number) bounds.get(3)).doubleValue()) return null;
         return bounds;
     }
 
-    private Map<String, Object> searchLayers(String query) {
+    private Map<String, Object> searchLayers(String query, long deadlineNanos) {
         String term = Assistant.trim(query);
         var data = get(FTS, Map.of("searchtext", "Karte: " + term, "limit", 10),
-                "catalogUnavailable", "invalidCatalog", null, 9);
+                "catalogUnavailable", "invalidCatalog", null, 9, deadlineNanos);
         if (!(data.get("results") instanceof List<?> rows)) throw new Assistant.Failure(502, "invalidCatalog");
 
         record Node(Object value, String parent) {}
@@ -245,7 +270,7 @@ final class Geo {
             var node = Assistant.objectOrEmpty(next.value);
             Object id = node.get("dataproduct_id");
             String title = geoText(node.get("display"), 120);
-            if (!Assistant.valid(id, Assistant.ID_SCHEMA) || title.isEmpty()) continue;
+            if (!Schemas.valid(id, Schemas.CATALOG_ID) || title.isEmpty()) continue;
             var entry = Assistant.obj("id", id, "title", title);
             if (next.parent.isEmpty()) {
                 roots.putIfAbsent((String) id, entry);
@@ -263,12 +288,12 @@ final class Geo {
         }
         children.sort(Comparator.comparingLong(Child::relevance).reversed());
         for (var child : children) roots.putIfAbsent(Assistant.string(child.entry, "id"), child.entry);
-        return Assistant.obj("layers", roots.values().stream().limit(Assistant.limit("perSearch")).toList());
+        return Assistant.obj("layers", roots.values().stream().limit(Schemas.LAYERS_PER_SEARCH).toList());
     }
 
-    private Map<String, Object> layerDetails(String id) {
+    private Map<String, Object> layerDetails(String id, long deadlineNanos) {
         var data = get("/api/dataproduct/v1/weblayers", Map.of("filter", id),
-                "catalogUnavailable", "invalidCatalog", "layerUnknown", 9);
+                "catalogUnavailable", "invalidCatalog", "layerUnknown", 9, deadlineNanos);
         if (!(data.getOrDefault(id, List.of()) instanceof List<?> rows)) throw new Assistant.Failure(502, "invalidCatalog");
         for (Object raw : rows) {
             var node = Assistant.objectOrEmpty(raw);
@@ -303,11 +328,11 @@ final class Geo {
         return true;
     }
 
-    private Map<String, Object> resolveLocation(String address) {
+    private Map<String, Object> resolveLocation(String address, long deadlineNanos) {
         var requested = addressFields(address);
         if (requested == null) throw new Assistant.Failure(400, "invalidLocation");
         var data = get(FTS, Map.of("searchtext", joinAddress(requested), "filter", ADDRESS_LAYER, "limit", 10),
-                "locationUnavailable", "invalidLocation", null, 9);
+                "locationUnavailable", "invalidLocation", null, 9, deadlineNanos);
         if (!(data.get("results") instanceof List<?> rows)) throw new Assistant.Failure(502, "invalidLocation");
         var candidates = new LinkedHashMap<List<Object>, Map<String, Object>>();
         for (Object raw : rows) {
@@ -325,13 +350,13 @@ final class Geo {
         return Assistant.obj("status", status, "candidates", candidates.values().stream().limit(5).toList());
     }
 
-    private Map<String, Object> queryFeatures(String id, Object easting, Object northing) {
+    private Map<String, Object> queryFeatures(String id, Object easting, Object northing, long deadlineNanos) {
         var geometry = Assistant.obj("type", "Point", "coordinates", List.of(easting, northing),
                 "crs", Assistant.obj("type", "name", "properties", Assistant.obj("name", "EPSG:2056")));
         int limit = 5;
         var data = get("/api/data/v1/" + URLEncoder.encode(id, UTF_8) + "/", Map.of(
                 "filter_geom", Assistant.JSON.toJson(geometry), "limit", limit),
-                "dataUnavailable", "invalidData", "datasetUnavailable", 9);
+                "dataUnavailable", "invalidData", "datasetUnavailable", 9, deadlineNanos);
         Object matched = data.get("numberMatched");
         if (!"FeatureCollection".equals(data.get("type")) || !(data.get("features") instanceof List<?> raw)
                 || !Assistant.isInteger(matched) || ((Number) matched).doubleValue() < raw.size()) {

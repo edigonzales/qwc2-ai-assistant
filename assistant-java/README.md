@@ -2,15 +2,28 @@
 
 Die Implementierung unter `assistant-java/` ist ein experimenteller Java-Klon des Python-FastAPI-Backends. Die Python-Version bleibt bis auf Weiteres die massgebliche Referenzimplementierung und das Standardbackend. Weder QWC2 noch Docker Compose werden automatisch auf Java umgestellt. Eine spätere Ablösung ist nicht Bestandteil dieses Auftrags.
 
-Die Portierung basiert auf dem Remote-HEAD `8b35a19fd05ca63d4c0d7bc9d7003a27746ed65a` von `codex/model-gis-intents`.
+Die Portierung folgt dem FastAPI-Stand `abdfa1fcf6ad16219c2a080fd5aa2e3cab4efc58` auf `main`.
 
 Java 25 und Avaje Jex 3.6 bedienen die drei HTTP-Routen über den JDK HttpServer. Avaje JSON Core 3.16 liest und schreibt dynamische JSON-Nachrichten. Jex bringt Avaje AppLog 1.2 transitiv mit. Der JDK HttpClient ruft die festen Infomaniak- und Solothurner Endpunkte auf. Virtuelle Threads übernehmen die HTTP-Verarbeitung und die begrenzten Leseoperationen.
 
-`Assistant.java` validiert das Chatprotokoll und baut die Nachweise pro GIS-Auftrag aus den vom Browser zurückgegebenen Tool-Runden neu auf. Das Modell deklariert die Aufträge in der ersten Runde. Nummerierte Layer, Kartenaktionen und Punktabfragen müssen zum jeweiligen Auftrag und seinen Nachweisen passen. Offene Aufträge kommen als `pending` zurück und lassen sich mit `resume` präzisieren. QWC2 führt Kartenaktionen aus und meldet deren Ergebnis.
+`Assistant.java` nimmt HTTP-Anfragen entgegen, spricht mit Infomaniak und
+schreibt die Diagnostik. `Intents.java` erstellt den Modellkontext und prüft
+die Absichtserklärung, ihre Suchargumente und Verweise auf frühere Treffer.
+`ChatTurn.java` führt die Aufträge einer Nachricht der Reihe nach aus und
+liefert Ergebnisse, Rückfragen und Kartenbefehle. Der Browser sendet pro
+Nachricht einen Chat-POST und führt die Kartenbefehle in QWC2 aus.
 
-`Geo.java` implementiert `search_layers`, `get_layer_details`, `resolve_location`, `query_features` und `search_objects`. Die Objektsuche lädt die Filter je Thema aus `themes.json` und hält diese 30 Sekunden im Speicher. Ein automatischer Zoom benötigt einen eindeutigen Treffer mit gültiger LV95-Bounding-Box und vollständig ausgewerteten Suchresultaten.
+`Geo.java` liest Suche, Layerdetails, Adressen und Datenpunkte. Ein
+automatischer Zoom braucht einen eindeutigen, vollständigen Objekttreffer
+mit gültiger LV95-Bounding-Box. Die fünf Leseoperationen stehen auch
+über `/api/v1/geo` zur Verfügung.
 
-`shared/tools.json` ist die gemeinsame Quelle für Tooldefinitionen und Limits. JBang legt die Datei in die Artefakte. `text-data.json` enthält die Namenszuordnungen der HTML-Zeichenreferenzen und das Case Folding aus Unicode 15.0. Sie dienen der gleichen Textnormalisierung wie `html.unescape` und `str.casefold` in der Python-Referenz. Quellen und Lizenzen stehen in der Ressource. [WHATWG-Zeichenreferenzen](https://html.spec.whatwg.org/entities.json) · [Unicode Case Folding](https://www.unicode.org/Public/15.0.0/ucd/CaseFolding.txt)
+`shared/limits.json` enthält die gemeinsamen Grenzen für Text, Verlauf
+und Anfragen. `Schemas.java` definiert die Java-seitigen Feldregeln und
+Arbeitsgrenzen. JBang übernimmt die Limits und `text-data.json` in die
+Artefakte. `text-data.json` liefert HTML-Zeichenreferenzen und Case Folding
+aus Unicode 15.0 für dieselbe Textnormalisierung wie in FastAPI.
+Quellen und Lizenzen stehen in der Ressource.
 
 ## Lokal starten
 
@@ -90,7 +103,7 @@ jbang assistant-java/AssistantTest.java
 npm test
 ```
 
-Mit einem Python-Interpreter, in dem `assistant/requirements.txt` installiert ist, starten dieselben Tests zusätzlich die unveränderte FastAPI-App gegen dieselben lokalen HTTP-Fixtures. Die Tests vergleichen Status und JSON-Werte. Zufällige Objektreferenzen und JSON-Formatierung in Toolargumenten werden beim Vergleich normalisiert. Die Java-Tests prüfen zusätzlich, ob `zoom_ref` genau zu einem ausgegebenen Treffer gehört.
+Mit einem Python-Interpreter, in dem `assistant/requirements.txt` installiert ist, starten dieselben Tests zusätzlich die unveränderte FastAPI-App gegen dieselben lokalen HTTP-Fixtures. Die Tests vergleichen Status und JSON-Werte sowie die Reihenfolge der Modellaufrufe. Zufällige Objektreferenzen und JSON-Formatierung innerhalb der Modellnachrichten werden beim Vergleich normalisiert. Die Java-Tests prüfen zusätzlich, ob `zoom_ref` genau zu einem ausgegebenen Treffer gehört.
 
 ```sh
 python3.12 -m venv /tmp/qwc-parity-venv
@@ -98,7 +111,7 @@ python3.12 -m venv /tmp/qwc-parity-venv
 jbang assistant-java/AssistantTest.java /tmp/qwc-parity-venv/bin/python
 ```
 
-## Messung
+## Historische Messung für die frühere Chat-Schnittstelle
 
 Apple M1 mit macOS 15.8.1, Temurin 25.0.5.1, JBang 0.138.0 und Oracle GraalVM 25.0.4+7.1. Median aus fünf Prozessstarts je Variante auf dem laufenden Arbeitsplatzrechner. Ab Prozessstart wurde `/healthz` bis zur ersten erfolgreichen Antwort im Abstand von 5 ms abgefragt. Nach einer Sekunde Leerlauf wurde der RSS mit `ps -o rss=` erfasst. Danach folgte die erste Altlasten-Suche über HTTPS bei geo.so.ch. Ihre Dauer enthält Netzwerklatenz.
 
@@ -116,6 +129,7 @@ Im QWC2-Browser lud der kombinierte Auftrag den Kataster der belasteten Standort
 
 Die Interpretation von Absicht, Negation und Hypothesen folgt wie in FastAPI der Modelldeklaration. Der Server erzwingt die Tool- und Nachweisregeln für den deklarierten Auftrag. Die Tests und die Live-Prüfung sind Stichproben für diese Modellentscheidung.
 
-Eine syntaktisch ungültige JSON-Antwort des Inferenzdienstes liefert in Java `502 invalidModelResponse`. In diesem Fall wirft das Python-SDK bereits vor der Modellvalidierung eine Ausnahme und FastAPI liefert HTTP 500. Java begrenzt zusätzlich die Providerantwort auf 4 MiB. Das bestehende 4-MiB-Limit der Solothurner Antwort bleibt erhalten.
-
-Beim Live-Befehl «Suche das Grundstück 2084 in Solothurn, aber zoome nicht» lieferten beide Backends `502 invalidModelResponse`. Die Karte blieb unverändert. Die hypothetische Zoomfrage wurde ohne Kartenänderung beantwortet.
+Syntaktisch ungültiges Modell-JSON führt bei beiden Backends zu
+`502 invalidModelResponse`. Java begrenzt die Providerantwort zusätzlich
+auf 4 MiB. Die Begrenzung der Solothurner Antwort auf 4 MiB gilt für beide
+Backends.

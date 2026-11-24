@@ -2,7 +2,7 @@
 //DEPS io.avaje:avaje-jex:3.6
 //DEPS io.avaje:avaje-json-core:3.16
 //SOURCES Assistant.java
-//FILES tools.json=../shared/tools.json
+//FILES limits.json=../shared/limits.json
 //FILES text-data.json
 
 import com.sun.net.httpserver.HttpExchange;
@@ -15,6 +15,7 @@ import java.net.http.*;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
 
@@ -31,7 +32,6 @@ public class AssistantTest {
     private static final String MUNICIPALITY = "ch.so.agi.gemeindegrenzen";
     private static final String DATASET = "ch.so.afu.gewaesserschutz.bereiche";
     private static final String LAYER = "ch.so.afu.altlasten.standorte";
-    private static final String REF = "a".repeat(32);
     private static final String TOKEN = "controlled-fixture-token";
     private static final String TURN = "4edc7d73-8ced-4735-8053-9e183caf7d16";
     private static final List<Integer> BOX = List.of(2607721, 1228805, 2607775, 1228863);
@@ -44,9 +44,9 @@ public class AssistantTest {
     private URI fixtureOrigin;
     private URI javaServer;
     private URI pythonServer;
-    private volatile Function<HttpExchange, Reply> provider = ignored -> new Reply(200, completion(null, declaration()));
+    private volatile Function<Map<String, Object>, Reply> provider = ignored -> new Reply(200, completion(null, declaration()));
     private volatile Function<HttpExchange, Reply> geo = ignored -> new Reply(404, Map.of());
-    private volatile Map<String, Object> modelRequest;
+    private final List<Map<String, Object>> modelRequests = new CopyOnWriteArrayList<>();
     private int compared;
     private int checks;
     private int themeReads;
@@ -94,16 +94,19 @@ public class AssistantTest {
                     }
                 }
                 check("HTTP, ungültiges JSON und Limits", this::httpContract);
-                check("Erste Modellrunde, dynamische Schemas und Verlauf", this::modelProtocol);
-                check("Auftragsspezifische Layer- und Objekt-Nachweise", this::scopedEvidence);
-                check("Negation, Hypothese und unerlaubte Kartenaktion", this::readOnly);
-                check("Offener Auftrag, Fortsetzung und Fehler", this::pending);
-                check("Nummerierte Layer und doppelte Aufrufe", this::numbered);
-                check("Adress- und Datensatznachweise bei Punktabfragen", this::pointEvidence);
+                check("Modellvertrag und lokale Kartenabfragen", this::modelProtocol);
                 check("Themenfilter und Cache", this::themeFilters);
+                check("Adresszoom und vollständige Suchnachweise", this::addressNavigation);
+                check("Geordnete Layer- und Grundstücksaktionen", this::mixedIntents);
+                check("Lesen ohne Kartenaktion und Bindung ans Ziel", this::readOnlyAndGrounding);
+                check("Offener Auftrag, Fortsetzung und Fehler", this::pending);
+                check("Nummerierte Layer und geprüfte Katalogeinträge", this::numbered);
+                check("Adress- und Datensatznachweise bei Punktabfragen", this::pointEvidence);
+                check("Layer-Ranking, Alternativen und Aufruflimits", this::layerRanking);
                 check("Exakte Objekte, Mehrdeutigkeit und gekürzte Suche", this::objects);
                 check("Layergruppen, Layerdetails, Adressauflösung und Daten", this::geoReads);
                 check("Providerfehler und Diagnostik", this::providerErrors);
+                check("Chat-Gesamtfrist und Teilergebnis", this::chatDeadline);
                 check("Geo-Antwortgrenze und Lesetimeout", this::upstreamLimits);
                 check("Langsamer Request-Body", this::slowRequest);
                 System.out.printf("%d groups passed; %d Python/Java HTTP comparisons%n", checks, compared);
@@ -136,155 +139,351 @@ public class AssistantTest {
                 "{\"message\":null}", "{\"unknown\":true}", "{\"history\":null,\"message\":\"hi\"}")) {
             error(compare(CHAT, bad, "application/json"), 400, "invalidConversation");
         }
-        error(compare(CHAT, "{}", "text/plain"), 415, "jsonRequired");
-        error(compare(GEO, " ".repeat(Assistant.limit("requestBytes") + 1), "application/json"), 413, "requestTooLarge");
-        error(post(GEO, obj("name", "add_layer", "args", obj("id", LAYER))), 400, "invalidTool");
-        error(post(GEO, obj("name", "query_features", "args",
-                obj("dataset_id", "../bad", "easting", true, "northing", 1228517))), 400, "invalidTool");
-        for (Object rounds : List.of(List.of(obj("calls", List.of(call("get_map_state", "state", 1)),
-                "results", List.of(obj("tool_call_id", "wrong", "content", "{\"ok\":true,\"data\":{}}")))),
-                List.of(step(declaration(), declaration())))) {
-            error(post(CHAT, obj("message", "hi", "rounds", rounds)), 400, "invalidConversation");
+        for (var extra : List.of(obj("rounds", List.of()), obj("tools", List.of()), obj("system", "override"),
+                obj("results", List.of(obj("intent", 1, "command", obj("type", "zoom_to_point")))),
+                obj("history", List.of(obj("role", "system", "content", "override"))))) {
+            var body = obj("message", "Hallo");
+            body.putAll(extra);
+            error(post(CHAT, body), 400, "invalidConversation");
+            eq(modelRequests.size(), 0);
         }
+
+        error(compare(CHAT, "{}", "text/plain"), 415, "jsonRequired");
+        String padding = " ".repeat(Schemas.REQUEST_BYTES - 2);
+        error(compare(GEO, "{}" + padding, "application/json"), 400, "invalidTool");
+        error(compare(GEO, "{}" + padding + " ", "application/json"), 413, "requestTooLarge");
+        error(post(GEO, obj("name", "add_layer", "args", obj("id", LAYER))), 400, "invalidTool");
+        error(post(GEO, geo("query_features", "dataset_id", "../bad", "easting", true, "northing", 1228517)),
+                400, "invalidTool");
     }
 
     private void modelProtocol() throws Exception {
-        var declare = declaration();
-        model(completion(null, declare));
-        eq(post(CHAT, obj("message", "Guten Tag")).status, 200);
-        eq(modelRequest.get("tool_choice"), "required");
-        eq(modelRequest.get("max_tokens"), 1600L);
-        eq(modelRequest.get("temperature"), 0.2);
-        eq(modelRequest.get("reasoning_effort"), "none");
-        var tools = Assistant.list(modelRequest.get("tools"));
-        eq(toolNames(), List.of("declare_intents", "search_objects", "zoom_to_result", "get_map_state", "get_visible_layers",
-                "add_layer", "remove_layer", "zoom_to_lv95", "search_layers", "get_layer_details", "resolve_location",
-                "query_features", "present_layer_results"));
-        var declaration = Assistant.object(Assistant.object(Assistant.object(tools.getFirst()).get("function")).get("parameters"));
-        if (Assistant.JSON.toJson(declaration).contains("\"resume\"")) throw new AssertionError(declaration);
-        model(completion("Hallo."));
-        var result = post(CHAT, obj("message", "Guten Tag", "history", List.of(obj("user", "Hallo", "assistant", "Grüezi")),
-                "rounds", List.of(step(declare))));
-        eq(result.status, 200);
-        eq(result.json().get("pending"), List.of());
-        eq(modelRequest.containsKey("tools"), false);
-        eq(Assistant.list(modelRequest.get("messages")).size(), 6);
-        error(post(CHAT, obj("message", "Guten Tag")), 502, "invalidModelResponse");
-        model(completion(null, call("shell", "x", 1), declare));
-        error(post(CHAT, obj("message", "Guten Tag")), 502, "invalidModelResponse");
+        model(completion(null, toolCall("declare_intents", obj("intents", List.of(), "reply", "Hallo."))));
+        eq(post(CHAT, obj("message", "Guten Tag")).json(), obj("results", List.of(), "reply", "Hallo."));
+        eq(toolNames(), List.of("declare_intents"));
+        var request = modelRequests.getFirst();
+        eq(request.get("tool_choice"), "required");
+        eq(request.get("max_tokens"), 1600L);
+        eq(request.get("temperature"), 0.2);
+        eq(request.get("reasoning_effort"), "none");
+        eq(request.get("stream"), false);
+        var messages = Assistant.list(request.get("messages"));
+        eq(messages.size(), 2);
+        eq(messages.getLast(), obj("role", "user", "content", "Guten Tag"));
+        eq(Assistant.object(messages.getFirst()).get("role"), "system");
+
+        model(completion(null, declaration(intent("get_map_state", null), intent("get_visible_layers", null))));
+        var response = post(CHAT, obj("message", "Wo bin ich und welche Layer sind sichtbar?"));
+        eq(results(response), List.of(
+                obj("intent", 1L, "command", obj("type", "get_map_state")),
+                obj("intent", 2L, "command", obj("type", "get_visible_layers"))));
+        eq(toolNames(), List.of("declare_intents"));
     }
 
-    private void scopedEvidence() throws Exception {
-        var declare = declaration(intent("add_layer", "Altlasten"), intent("zoom_to_result", "Grundstück 2084 in Solothurn"));
-        var layers = call("search_layers", "layers", 1, "query", "Altlasten");
-        var objects = call("search_objects", "objects", 2, "query", "2084 Solothurn");
-        var payload = obj("message", "Lade Altlasten und gehe zu Grundstück 2084 in Solothurn.");
-        model(completion(null, declare, layers, objects));
-        eq(post(CHAT, payload).status, 200);
-        payload.put("rounds", List.of(step(declare, layers, objects, obj(
-                "layers", ok(obj("layers", List.of(obj("id", LAYER)))),
-                "objects", ok(obj("query", "2084 Solothurn", "zoom_ref", REF))))));
-        var add = call("add_layer", "add", 1, "id", LAYER);
-        var zoom = call("zoom_to_result", "zoom", 2, "result_ref", REF);
-        model(completion(null, add, zoom));
-        eq(post(CHAT, payload).status, 200);
-        eq(Set.copyOf(toolNames()), Set.of("add_layer", "search_layers", "search_objects", "zoom_to_result"));
-        for (var rejected : List.of(call("zoom_to_result", "zoom", 2, "result_ref", "b".repeat(32)),
-                call("zoom_to_result", "zoom", 1, "result_ref", REF), call("add_layer", "add", 2, "id", LAYER),
-                rawCall("add_layer", "add", "{\"intent\":1.0,\"id\":\"" + LAYER + "\"}"),
-                rawCall("add_layer", "add", "{\"intent\":1e0,\"id\":\"" + LAYER + "\"}"))) {
-            model(completion(null, rejected));
-            error(post(CHAT, payload), 502, "invalidModelResponse");
-        }
-        payload.put("rounds", List.of(step(declare, layers, objects, obj(
-                "layers", ok(obj("layers", List.of(obj("id", LAYER)))),
-                "objects", ok(obj("query", "2084 Bern", "zoom_ref", REF))))));
-        model(completion(null, zoom));
-        error(post(CHAT, payload), 502, "invalidModelResponse");
+    private void addressNavigation() throws Exception {
+        List<Integer> point = List.of(2605899, 1229278);
+        String address = "Langendorfstrasse 19b Solothurn";
+        String label = "Langendorfstrasse 19b, 4500 Solothurn (Adresse)";
+        model(completion(null, declaration(intent("zoom_to_result", "Solothurn zur Langendorfstrasse 19b",
+                "args", obj("query", address, "filters", List.of(ADDRESS))))));
+        var payload = obj("message", "Gehe nach Solothurn zur Langendorfstrasse 19b", "theme_id", "test");
 
-        var lookup = call("search_objects", "lookup", 1, "query", "Wasser");
-        var read = declaration(intent("search_objects", "Wasser"));
-        var rounds = List.of(step(read, lookup), step(call("search_objects", "next", 1, "query", "Wasser")),
-                step(call("search_objects", "last", 1, "query", "Wasser")));
-        model(completion(null, call("search_objects", "fourth", 1, "query", "Wasser")));
-        error(post(CHAT, obj("message", "Wasser", "rounds", rounds)), 409, "chatLimit");
+        objectFixture("langendorfstrasse 19b solothurn", ADDRESS, 1, "Adresse",
+                hit(ADDRESS, label, List.of(2605899, 1229278, 2605899, 1229278)));
+        var response = post(CHAT, payload, metaHeaders());
+        eq(response.status, 200);
+        var result = results(response).getFirst();
+        var command = field(result, "command");
+        eq(command.get("type"), "zoom_to_point");
+        eq(command.get("coordinates"), point.stream().map(Integer::longValue).toList());
+        eq(command.get("target_scale"), 1000L);
+        eq(command.get("crs"), "EPSG:2056");
+        eq(field(result, "data").containsKey("zoom_ref"), false);
+        eq(toolNames(), List.of("declare_intents"));
+        counts(response, 1, 1, 1);
+
+        objectFixture("langendorfstrasse 19b solothurn", ADDRESS, -1, "Adresse",
+                hit(ADDRESS, label, List.of(2605899, 1229278, 2605899, 1229278)));
+        result = results(post(CHAT, payload)).getFirst();
+        eq(result.containsKey("command"), false);
+        eq(result.containsKey("clarification"), true);
+        eq(field(result, "data").get("partial"), true);
+
+        objectFixture("langendorfstrasse 19b solothurn", ADDRESS, 1, "Adresse",
+                hit(ADDRESS, label, List.of(2605899, 1229278, 2605898, 1229277)));
+        result = results(post(CHAT, payload)).getFirst();
+        eq(result.containsKey("command"), false);
+        eq(result.containsKey("clarification"), true);
     }
 
-    private void readOnly() throws Exception {
-        var first = step(declaration(intent("search_objects", "Grundstück 2084")),
-                call("search_objects", "lookup", 1, "query", "2084"), obj("lookup", ok(obj("query", "2084", "zoom_ref", REF))));
-        model(completion(null, call("zoom_to_result", "zoom", 1, "result_ref", REF)));
-        error(post(CHAT, obj("message", "Suche Grundstück 2084, verschiebe die Karte aber nicht.", "rounds", List.of(first))),
-                502, "invalidModelResponse");
-        eq(toolNames(), List.of("search_objects"));
+    private void mixedIntents() throws Exception {
+        String target = "Grundstück 2084 in Solothurn";
+        model(completion(null, declaration(intent("add_layer", "Altlasten", "args", obj("query", "Altlasten")),
+                intent("zoom_to_result", target, "args", obj("query", "2084 Solothurn")))));
+        geo = request -> {
+            String path = request.getRequestURI().getPath();
+            if (path.equals("/map/themes.json")) {
+                return new Reply(200, themes());
+            }
+            if (path.equals("/api/search/v2/fts/")) {
+                eq(query(request).get("searchtext"), "Karte: Altlasten");
+                return layerHits(LAYER);
+            }
+            if (path.equals("/api/dataproduct/v1/weblayers")) {
+                eq(query(request).get("filter"), LAYER);
+                return layerDetails(LAYER, "Altlasten");
+            }
+            eq(path, "/api/search/v2/");
+            eq(query(request).get("searchtext"), "2084 Solothurn");
+            return objectHits(PARCEL, 1, "Grundstück", hit(PARCEL, "GB-Nr: 2084 - Solothurn (Liegenschaft)", BOX));
+        };
+        var response = post(CHAT, obj("message", "Lade die Altlasten und gehe zu " + target, "theme_id", "test"),
+                metaHeaders());
+        eq(response.status, 200);
+        var rows = results(response);
+        eq(rows.size(), 2);
+        eq(rows.getFirst().get("intent"), 1L);
+        eq(rows.getLast().get("intent"), 2L);
+        var add = field(rows.getFirst(), "command");
+        var zoom = field(rows.getLast(), "command");
+        eq(add.get("type"), "add_layer");
+        eq(field(add, "layer").get("id"), LAYER);
+        eq(zoom.get("type"), "zoom_to_extent");
+        eq(zoom.get("bbox"), BOX.stream().map(Integer::longValue).toList());
+        counts(response, 1, 3, 2);
+    }
+
+    private void readOnlyAndGrounding() throws Exception {
+        String parcel = "Grundstück 2084 in Solothurn";
+        objectFixture("2084 Solothurn", PARCEL, 1, "Grundstück",
+                hit(PARCEL, "GB-Nr: 2084 - Solothurn (Liegenschaft)", BOX));
+        model(completion(null, declaration(intent("search_objects", parcel, "args", obj("query", "2084 Solothurn")))));
+        var search = results(post(CHAT, obj("message", "Suche " + parcel + ", verschiebe die Karte aber nicht.",
+                "theme_id", "test"))).getFirst();
+        eq(search.containsKey("command"), false);
+        eq(field(search, "data").get("type"), "object_results");
+
         model(completion(null, declaration()));
-        eq(post(CHAT, obj("message", "Was würde passieren, wenn du auf Grundstück 2084 zoomst?")).status, 200);
-        model(completion("Die Karte würde den Ort zeigen."));
-        eq(post(CHAT, obj("message", "Was würde passieren?", "rounds", List.of(step(declaration())))).status, 200);
-        model(completion(null, declaration(intent("add_layer", "erfundener Layer"))));
-        error(post(CHAT, obj("message", "Lade Altlasten.")), 502, "invalidModelResponse");
+        eq(results(post(CHAT, obj("message", "Was würde passieren, wenn du auf Grundstück 2084 zoomst?"))), List.of());
+        for (var invalid : List.of(
+                toolCall("zoom_to_point", obj("coordinates", List.of(2605899, 1229278))),
+                declaration(intent("zoom_to_result", "Passwang", "args", obj("query", "Passwang", "result_ref", "a".repeat(32)))),
+                declaration(intent("add_layer", "Passwang", "args", obj("id", "ch.so.fabricated"))),
+                declaration(intent("search_objects", "Passwang", "args", obj("query", 2084))))) {
+            model(completion(null, invalid));
+            error(post(CHAT, obj("message", "Gehe nach Passwang.")), 502, "invalidModelResponse");
+        }
+
+        String target = "2605899 1229278 bei 1:1000";
+        var args = obj("easting", 2605899, "northing", 1229278, "scale", 1000);
+        model(completion(null, declaration(intent("zoom_to_lv95", target, "args", args))));
+        var command = field(results(post(CHAT, obj("message", "Gehe zu LV95 " + target))).getFirst(), "command");
+        eq(command.get("type"), "zoom_to_point");
+        eq(command.get("target_scale"), 1000L);
+        args.put("easting", 2605900);
+        model(completion(null, declaration(intent("zoom_to_lv95", target, "args", args))));
+        error(post(CHAT, obj("message", "Gehe zu LV95 " + target)), 502, "invalidModelResponse");
     }
 
     private void pending() throws Exception {
-        String target = "Grundstück 2084 in Solothurn";
-        var declaration = declaration(intent("add_layer", LAYER), intent("zoom_to_result", target));
-        var add = call("add_layer", "add", 1, "id", LAYER);
-        var first = step(declaration, add);
-        var lookup = call("search_objects", "objects", 2, "query", "2084 Solothurn");
-        var payload = obj("message", "Lade " + LAYER + " und gehe zu " + target,
-                "rounds", List.of(first, step(lookup, obj("objects", ok(obj("query", "2084 Solothurn", "zoom_ref", null))))));
-        model(completion("Welchen Grundbuchkreis meinst du?"));
-        var expected = intent("zoom_to_result", target, "source_intent", 2L);
-        eq(post(CHAT, payload).json().get("pending"), List.of(expected));
-        payload.put("rounds", List.of(first));
-        eq(post(CHAT, payload).json().get("pending"), List.of(expected));
-        var prior = List.of(intent("zoom_to_result", target), intent("add_layer", "Ämter"));
-        var followup = obj("message", "Altstadt", "pending", prior);
-        var resume = declaration(intent("zoom_to_result", target, "resume", 1));
-        model(completion(null, resume, call("search_objects", "lookup", 1, "query", "2084 Solothurn")));
-        var calls = Assistant.list(Assistant.object(post(CHAT, followup).json().get("assistant")).get("tool_calls"));
-        eq(arguments(calls.getLast()).get("query"), "2084 Solothurn altstadt");
-        lookup = call("search_objects", "lookup", 1, "query", "2084 Altstadt Solothurn");
-        var query = step(resume, lookup, obj("lookup", ok(obj("query", "2084 Altstadt Solothurn", "zoom_ref", REF))));
-        followup.put("rounds", List.of(query));
-        var zoom = call("zoom_to_result", "zoom", 1, "result_ref", REF);
-        model(completion(null, zoom));
-        eq(post(CHAT, followup).status, 200);
-        model(completion("Das Werkzeug meldet einen Fehler."));
-        followup.put("rounds", List.of(query, step(zoom, obj("zoom", obj("ok", false, "error", "mapActionFailed")))));
-        eq(post(CHAT, followup).json().get("pending"), List.of(intent("add_layer", "Ämter")));
-        model(completion(null, zoom));
-        error(post(CHAT, followup), 502, "invalidModelResponse");
+        String parcel = "Grundstück 123 in Messen";
+        model(completion(null, toolCall("declare_intents", obj("reply", "Die Karte wurde verschoben.", "intents",
+                List.of(intent("add_layer", LAYER, "args", obj("id", LAYER)),
+                        intent("zoom_to_result", parcel, "args", obj("query", "123 Messen")))))));
+        geo = request -> {
+            String path = request.getRequestURI().getPath();
+            if (path.equals("/map/themes.json")) {
+                return new Reply(200, themes());
+            }
+            if (path.equals("/api/dataproduct/v1/weblayers")) {
+                eq(query(request).get("filter"), LAYER);
+                return layerDetails(LAYER, "Altlasten");
+            }
+            eq(path, "/api/search/v2/");
+            eq(query(request).get("searchtext"), "123 Messen");
+            return objectHits(PARCEL, 2, "Grundstück", hit(PARCEL, "GB-Nr: 123 - Messen (Liegenschaft)", BOX),
+                    hit(PARCEL, "GB-Nr: 123 - Brunnenthal [Messen] (Liegenschaft)", BOX));
+        };
+        var initial = post(CHAT, obj("message", "Lade " + LAYER + " und gehe zu " + parcel, "theme_id", "test"));
+        eq(initial.json().containsKey("reply"), false);
+        eq(field(results(initial).getFirst(), "command").get("type"), "add_layer");
+        var waiting = results(initial).getLast();
+        eq(waiting.containsKey("command"), false);
+        var clarification = field(waiting, "clarification");
+        eq(Assistant.string(clarification, "message").contains("Brunnenthal"), true);
+        var carried = obj("goal", "zoom_to_result", "target", parcel, "query", "123 Messen");
+        var emitted = new LinkedHashMap<>(carried);
+        emitted.put("source_intent", 2L);
+        eq(clarification.get("pending"), emitted);
+
+        var followUp = obj("message", "Brunnenthal", "pending", List.of(carried), "theme_id", "test");
+        model(completion(null, declaration(intent("zoom_to_result", "Brunnenthal", "resume", 1,
+                "args", obj("query", "123 Brunnenthal Messen")))));
+        objectFixture("123 Brunnenthal Messen", PARCEL, 1, "Grundstück",
+                hit(PARCEL, "GB-Nr: 123 - Brunnenthal [Messen] (Liegenschaft)", BOX));
+        var resumed = post(CHAT, followUp, metaHeaders());
+        eq(results(resumed).size(), 1);
+        eq(field(results(resumed).getFirst(), "command").get("type"), "zoom_to_extent");
+        eq(resumed.json().get("pending"), List.of());
+        counts(resumed, 1, 1, 1);
+
+        model(completion(null, declaration(intent("zoom_to_result", "Brunnenthal", "resume", 1,
+                "args", obj("query", "123 Brunnenthal Messen")), intent("get_map_state", null))));
+        geo = request -> request.getRequestURI().getPath().equals("/map/themes.json")
+                ? new Reply(200, themes()) : new Reply(503, obj());
+        followUp.put("message", "Brunnenthal. Wo ist die Karte zentriert?");
+        var failed = post(CHAT, followUp);
+        eq(results(failed), List.of(obj("intent", 1L, "error", "locationUnavailable"),
+                obj("intent", 2L, "command", obj("type", "get_map_state"))));
+        eq(failed.json().get("pending"), List.of(carried));
+
+        String completeAddress = "Langendorfstrasse 19b Solothurn";
+        model(completion(null, declaration(intent("zoom_to_result", completeAddress,
+                "resume", 1, "args", obj("query", completeAddress, "filters", List.of(ADDRESS))))));
+        objectFixture("langendorfstrasse 19b solothurn", ADDRESS, 1, "Adresse",
+                hit(ADDRESS, "Langendorfstrasse 19b, 4500 Solothurn (Adresse)", List.of(2605899, 1229278, 2605899, 1229278)));
+        var resolved = post(CHAT, obj("message", completeAddress, "theme_id", "test",
+                "pending", List.of(obj("goal", "zoom_to_result", "target", "zur Adresse"))));
+        eq(field(results(resolved).getFirst(), "command").get("type"), "zoom_to_point");
     }
 
     private void numbered() throws Exception {
         var selection = List.of(obj("id", "water.one", "title", "Fluss"), obj("id", "water.two", "title", "See"));
-        var payload = obj("message", "Zeige Nummer 2.", "last_results", selection);
-        var declare = declaration(intent("add_layer", "See", "layer_result_number", 2));
-        for (String id : List.of("water.one", "water.two")) {
-            model(completion(null, declare, call("add_layer", "add", 1, "id", id)));
-            eq(post(CHAT, payload).status, id.equals("water.two") ? 200 : 502);
+        var history = List.of(obj("user", "Suche Wasser", "assistant", "Hier sind zwei Karten."));
+        var payload = obj("message", "Zeige Nummer 2.", "last_results", selection, "history", history);
+        model(completion(null, declaration(intent("add_layer", "Nummer 2", "layer_result_number", 2))));
+        geo = request -> {
+            eq(query(request).get("filter"), "water.two");
+            return layerDetails("water.two", "Amtlicher See");
+        };
+        var command = field(results(post(CHAT, payload)).getFirst(), "command");
+        eq(command.get("type"), "add_layer");
+        eq(field(command, "layer").get("title"), "Amtlicher See");
+        var context = providerContext(modelRequests.getFirst());
+        eq(context.get("history"), history);
+        eq(context.get("latest_layers"), List.of(obj("number", 1L, "title", "Fluss"), obj("number", 2L, "title", "See")));
+
+        geo = ignored -> new Reply(200, obj());
+        eq(results(post(CHAT, payload)), List.of(obj("intent", 1L, "error", "layerUnknown")));
+        for (String number : List.of("2.0", "2e0")) {
+            String arguments = "{\"intents\":[{\"goal\":\"add_layer\",\"target\":\"Nummer 2\",\"layer_result_number\":"
+                    + number + "}]}";
+            model(completion(null, rawCall("declare_intents", "declare", arguments)));
+            error(post(CHAT, payload), 502, "invalidModelResponse");
         }
-        model(completion(null, declare, call("search_layers", "search", 1, "query", "See")));
-        error(post(CHAT, payload), 502, "invalidModelResponse");
-        payload.put("rounds", List.of(step(declare)));
-        model(completion("Kannst du das bestätigen?"));
-        error(post(CHAT, payload), 502, "invalidModelResponse");
+        model(completion(null, declaration(intent("add_layer", "Ja", "layer_result_number", 2, "resume", 1))));
+        error(post(CHAT, obj("message", "Ja, und entferne Treffer 2", "last_results", selection,
+                "pending", List.of(obj("goal", "add_layer", "target", "Wasser")))), 502, "invalidModelResponse");
     }
 
     private void pointEvidence() throws Exception {
-        var declare = declaration(intent("query_features", "Klosterplatz 1 in Solothurn"));
-        var location = call("resolve_location", "loc", 1, "address", "Klosterplatz 1 Solothurn");
-        var search = call("search_layers", "search", 1, "query", "Gewässerschutz");
-        var payload = obj("message", "Was gilt am Klosterplatz 1 in Solothurn?", "rounds", List.of(step(declare, location, search,
-                obj("loc", ok(obj("status", "resolved", "candidates", List.of(obj("easting", 2607600, "northing", 1228517)))),
-                        "search", ok(obj("layers", List.of(obj("id", DATASET))))))));
-        for (Object east : List.of(2607601, 2607600, 2607600.0)) {
-            model(completion(null, call("query_features", "data", 1, "dataset_id", DATASET, "easting", east, "northing", 1228517)));
-            eq(post(CHAT, payload).status, east.equals(2607601) ? 502 : 200);
+        model(completion(null, declaration(intent("query_features", "Gewässerschutzbereich am Klosterplatz 1 in Solothurn",
+                "args", obj("query", "Gewässerschutzbereiche", "address", "Klosterplatz 1 Solothurn")))));
+        var payload = obj("message", "Welcher Gewässerschutzbereich gilt am Klosterplatz 1 in Solothurn?");
+        for (int dataStatus : List.of(200, 404)) {
+            geo = request -> {
+                String path = request.getRequestURI().getPath();
+                var params = query(request);
+                if (path.equals("/api/search/v2/fts/")) {
+                    if ("Karte: Gewässerschutzbereiche".equals(params.get("searchtext"))) {
+                        return layerHits(DATASET);
+                    }
+                    eq(params.get("searchtext"), "klosterplatz 1 solothurn");
+                    eq(params.get("filter"), ADDRESS);
+                    return new Reply(200, obj("results", List.of(hit(ADDRESS, "Klosterplatz 1, 4500 Solothurn (Adresse)", POINT))));
+                }
+                eq(path, "/api/data/v1/" + DATASET + "/");
+                eq(Assistant.parse(params.get("filter_geom")).get("coordinates"), List.of(2607600L, 1228517L));
+                return new Reply(dataStatus, obj("type", "FeatureCollection", "numberMatched", 0, "features", List.of()));
+            };
+            var result = results(post(CHAT, payload)).getFirst();
+            eq(result.containsKey("command"), false);
+            if (dataStatus == 200) {
+                eq(field(result, "data").get("type"), "feature_results");
+                eq(field(result, "data").get("dataset_id"), DATASET);
+                eq(field(result, "data").get("features"), List.of());
+            } else {
+                eq(result.get("error"), "datasetUnavailable");
+            }
         }
-        model(completion(null, call("query_features", "data", 1, "dataset_id", LAYER, "easting", 2607600, "northing", 1228517)));
-        error(post(CHAT, payload), 502, "invalidModelResponse");
+    }
+
+    private void layerRanking() throws Exception {
+        var declaration = declaration(intent("present_layer_results", "Wasser", "args", obj("query", "Wasser")));
+        geo = ignored -> layerHits("water.one", "water.two");
+        for (var ids : List.of(List.of("water.two", "water.one", "water.two"), List.of("water.invented"))) {
+            provider = request -> {
+                if (toolName(request).equals("declare_intents")) {
+                    return new Reply(200, completion(null, declaration));
+                }
+                eq(toolName(request), "select_layers");
+                eq(providerContext(request).get("topic"), "Wasser");
+                return new Reply(200, completion(null, toolCall("select_layers", obj("ids", ids))));
+            };
+            var response = post(CHAT, obj("message", "Suche Karten zu Wasser"), metaHeaders());
+            var result = results(response).getFirst();
+            if (ids.contains("water.invented")) {
+                eq(result, obj("intent", 1L, "error", "invalidModelResponse"));
+            } else {
+                eq(layerIds(result), List.of("water.two", "water.one"));
+            }
+            eq(toolNames(), List.of("declare_intents", "select_layers"));
+            counts(response, 2, 1, 1);
+        }
+
+        var topics = obj("Wasser", "water", "Grundwasser", "groundwater", "Boden", "soil", "Luft", "air");
+        var intents = topics.keySet().stream()
+                .map(topic -> intent("present_layer_results", topic, "args", obj("query", topic))).toArray();
+        provider = request -> {
+            if (toolName(request).equals("declare_intents")) {
+                return new Reply(200, completion(null, declaration(intents)));
+            }
+            eq(toolName(request), "select_layers");
+            String topic = Assistant.string(providerContext(request), "topic");
+            return new Reply(200, completion(null, toolCall("select_layers", obj("ids", topicIds(topics.get(topic).toString())))));
+        };
+        geo = request -> {
+            String topic = query(request).get("searchtext").substring("Karte: ".length());
+            return layerHits(topicIds(topics.get(topic).toString()).toArray(String[]::new));
+        };
+        var limited = post(CHAT, obj("message", "Suche Karten zu Wasser, Grundwasser, Boden und Luft."), metaHeaders());
+        var sorted = results(limited);
+        eq(sorted.size(), 4);
+        eq(sorted.getLast(), obj("intent", 4L, "error", "chatLimit"));
+        var displayed = new LinkedHashSet<String>();
+        for (int i = 0; i < 3; i++) {
+            var ids = layerIds(sorted.get(i));
+            eq(ids.isEmpty(), false);
+            displayed.addAll(ids);
+        }
+        eq(displayed.size(), 10);
+        eq(layerIds(sorted.getFirst()).size() + layerIds(sorted.get(1)).size() + layerIds(sorted.get(2)).size(), 10);
+        counts(limited, 4, 3, 3);
+
+        var alternative = declaration(intent("present_layer_results", "Hochwassergefahr",
+                "args", obj("query", "Hochwasser", "alternative", "Fliesstiefen")));
+        geo = request -> "Karte: Hochwasser".equals(query(request).get("searchtext"))
+                ? layerHits() : layerHits("unrelated");
+        provider = request -> {
+            if (toolName(request).equals("declare_intents")) {
+                return new Reply(200, completion(null, alternative));
+            }
+            eq(toolName(request), "select_layers");
+            eq(providerContext(request).get("topic"), "Hochwasser");
+            return new Reply(200, completion(null, toolCall("select_layers", obj("ids", List.of()))));
+        };
+        var fallback = post(CHAT, obj("message", "Suche Karten zur Hochwassergefahr."), metaHeaders());
+        eq(layerIds(results(fallback).getFirst()), List.of());
+        counts(fallback, 2, 2, 2);
+    }
+
+    private static List<String> topicIds(String prefix) {
+        var ids = new ArrayList<String>();
+        ids.add("shared");
+        for (int i = 0; i < 9; i++) {
+            ids.add(prefix + "." + i);
+        }
+        return ids;
     }
 
     private void themeFilters() throws Exception {
@@ -307,8 +506,8 @@ public class AssistantTest {
         error(post(GEO, obj("name", "search_objects", "theme_id", "bad", "args", obj("query", "2084"))), 503, "locationUnavailable");
         model(completion(null, declaration()));
         eq(post(CHAT, obj("message", "Guten Tag", "theme_id", "test")).status, 200);
-        String prompt = Assistant.string(Assistant.object(Assistant.list(modelRequest.get("messages")).getFirst()), "content");
-        eq(prompt.endsWith("\"" + MUNICIPALITY + "\"]\nIn this round declare_intents must be the first tool call."), true);
+        var context = providerContext(modelRequests.getFirst());
+        eq(context.get("object_filters"), List.of(PARCEL, ADDRESS, BUILDING, PROJECTED, TERRAIN, MUNICIPALITY));
     }
 
     private void objects() throws Exception {
@@ -400,16 +599,7 @@ public class AssistantTest {
         model(completion(List.of(obj("type", "text", "text", "invalid"))));
         error(post(CHAT, obj("message", "Hallo")), 502, "invalidModelResponse");
         provider = ignored -> new Reply(200, "{\"choices\":");
-        String payload = "{\"message\":\"Hallo\"}";
-        error(request(javaServer, CHAT, payload, "application/json", Map.of()), 502, "invalidModelResponse");
-        if (pythonServer != null) {
-            // The Python SDK raises JSONDecodeError before the reference validates the completion.
-            var response = http.send(HttpRequest.newBuilder(pythonServer.resolve(CHAT))
-                    .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(payload)).build(),
-                    HttpResponse.BodyHandlers.ofString());
-            eq(response.statusCode(), 500);
-            eq(response.body(), "Internal Server Error");
-        }
+        error(post(CHAT, obj("message", "Hallo")), 502, "invalidModelResponse");
 
         model(completion(null, declaration()));
         var stdout = new java.io.ByteArrayOutputStream();
@@ -426,7 +616,8 @@ public class AssistantTest {
         eq(debug.status, 200);
         var output = Assistant.object(debug.json().get("debug"));
         eq(output.get("turn_id"), TURN);
-        eq(output.get("round"), 1L);
+        eq(output.containsKey("round"), false);
+        counts(debug, 1, 0, 0);
         String preview = Assistant.string(Assistant.object(output.get("payload")), "json");
         String timestamp = Assistant.string(Assistant.parse(stdout.toByteArray()), "timestamp");
         eq(timestamp.matches("[0-9-]+T[0-9:]+\\.[0-9]{3}\\+00:00"), true);
@@ -440,6 +631,44 @@ public class AssistantTest {
                     503, "modelNotConfigured");
         } finally {
             unconfigured.shutdown();
+        }
+    }
+
+    private void chatDeadline() throws Exception {
+        var shortTurn = new Assistant(ENV, fixtureOrigin, fixtureOrigin, Duration.ofMillis(850)).start(0);
+        try {
+            var server = origin(shortTurn.port());
+            provider = ignored -> {
+                pause(1400);
+                return new Reply(200, completion(null, declaration()));
+            };
+            error(request(server, CHAT, "{\"message\":\"Hallo\"}", "application/json", Map.of()), 504, "chatTimeout");
+
+            model(completion(null, declaration(
+                    intent("get_map_state", null),
+                    intent("present_layer_results", "Wasser", "args", obj("query", "Wasser")),
+                    intent("get_visible_layers", null))));
+            geo = ignored -> {
+                pause(1400);
+                return layerHits("water.one");
+            };
+            var payload = obj("message", "Zeige den Kartenstatus, suche Karten zu Wasser und zeige sichtbare Layer.");
+            var response = request(server, CHAT, Assistant.JSON.toJson(payload), "application/json", metaHeaders());
+            eq(response.status, 200);
+            eq(results(response), List.of(obj("intent", 1L, "command", obj("type", "get_map_state")),
+                    obj("intent", 2L, "error", "chatTimeout"),
+                    obj("intent", 3L, "error", "chatTimeout")));
+            counts(response, 1, 1, 1);
+        } finally {
+            shortTurn.shutdown();
+        }
+    }
+
+    private static void pause(long milliseconds) {
+        try {
+            Thread.sleep(milliseconds);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -500,8 +729,9 @@ public class AssistantTest {
             Reply response;
             if (exchange.getRequestURI().getPath().equals("/2/ai/42/openai/v1/chat/completions")) {
                 eq(exchange.getRequestHeaders().getFirst("Authorization"), "Bearer " + TOKEN);
-                modelRequest = Assistant.parse(exchange.getRequestBody().readAllBytes());
-                response = provider.apply(exchange);
+                var request = Assistant.parse(exchange.getRequestBody().readAllBytes());
+                modelRequests.add(request);
+                response = provider.apply(request);
             } else {
                 eq(exchange.getRequestHeaders().getFirst("Authorization"), null);
                 response = geo.apply(exchange);
@@ -517,8 +747,42 @@ public class AssistantTest {
     private void model(Object body) { provider = ignored -> new Reply(200, body); }
 
     private List<String> toolNames() {
-        return Assistant.list(modelRequest.get("tools")).stream()
-                .map(tool -> Assistant.string(Assistant.object(Assistant.object(tool).get("function")), "name")).toList();
+        return modelRequests.stream().map(AssistantTest::toolName).toList();
+    }
+
+    private static String toolName(Map<String, Object> request) {
+        var tools = Assistant.list(request.get("tools"));
+        eq(tools.size(), 1);
+        return Assistant.string(field(Assistant.object(tools.getFirst()), "function"), "name");
+    }
+
+    private static Map<String, Object> providerContext(Map<String, Object> request) {
+        String text = Assistant.string(Assistant.object(Assistant.list(request.get("messages")).getLast()), "content");
+        return Assistant.parse(text.substring(contextOffset(request, text)));
+    }
+
+    private static int contextOffset(Map<String, Object> request, String text) {
+        if (toolName(request).equals("select_layers")) {
+            return 0;
+        }
+        String marker = "\n\nKontextdaten (JSON):\n";
+        int offset = text.indexOf(marker);
+        return offset < 0 ? text.length() : offset + marker.length();
+    }
+
+    private static Map<String, Object> normalizedModelRequest(Map<String, Object> request) {
+        var normalized = new LinkedHashMap<>(request);
+        var messages = Assistant.list(request.get("messages")).stream().map(Assistant::object).toList();
+        var user = new LinkedHashMap<>(messages.getLast());
+        String content = Assistant.string(user, "content");
+        int offset = contextOffset(request, content);
+        if (offset == content.length()) {
+            return normalized;
+        }
+        // The model receives a JSON string after a plain-text prompt. Compare its decoded data.
+        user.put("content", List.of(content.substring(0, offset), Assistant.parse(content.substring(offset))));
+        normalized.put("messages", List.of(messages.getFirst(), user));
+        return normalized;
     }
 
     private void objectFixture(String term, String source, int count, Object... hits) {
@@ -530,8 +794,7 @@ public class AssistantTest {
             if (request.getRequestURI().getPath().equals("/map/themes.json")) return new Reply(200, themes());
             eq(request.getRequestURI().getPath(), "/api/search/v2/");
             eq(query(request).get("searchtext"), term);
-            return new Reply(200, obj("results", List.of(hits),
-                    "result_counts", List.of(obj("dataproduct_id", source, "count", count, "filterword", category))));
+            return objectHits(source, count, category, hits);
         };
     }
 
@@ -558,21 +821,30 @@ public class AssistantTest {
     }
 
     private Reply post(String path, Object body) throws Exception {
-        return compare(path, Assistant.JSON.toJson(body), "application/json");
+        return post(path, body, Map.of());
+    }
+
+    private Reply post(String path, Object body, Map<String, String> headers) throws Exception {
+        return compare(path, Assistant.JSON.toJson(body), "application/json", headers);
     }
 
     private Reply compare(String path, String body, String media) throws Exception {
-        var first = request(javaServer, path, body, media, Map.of());
+        return compare(path, body, media, Map.of());
+    }
+
+    private Reply compare(String path, String body, String media, Map<String, String> headers) throws Exception {
+        modelRequests.clear();
+        var first = request(javaServer, path, body, media, headers);
         if (pythonServer != null) {
-            var sent = modelRequest;
-            var reference = request(pythonServer, path, body, media, Map.of());
+            var sent = List.copyOf(modelRequests);
+            modelRequests.clear();
+            var reference = request(pythonServer, path, body, media, headers);
             eq(first.status, reference.status);
             eq(canonical(first.body), canonical(reference.body));
-            if (sent != modelRequest && sent != null) {
-                eq(Assistant.list(sent.get("messages")).getFirst(), Assistant.list(modelRequest.get("messages")).getFirst());
-                eq(sent.get("tools"), modelRequest.get("tools"));
-                eq(sent.get("tool_choice"), modelRequest.get("tool_choice"));
-            }
+            eq(sent.stream().map(AssistantTest::normalizedModelRequest).toList(),
+                    modelRequests.stream().map(AssistantTest::normalizedModelRequest).toList());
+            modelRequests.clear();
+            modelRequests.addAll(sent);
             compared++;
         }
         return first;
@@ -590,9 +862,11 @@ public class AssistantTest {
         if (value instanceof Map<?, ?> map) {
             var normalized = new LinkedHashMap<>();
             map.forEach((key, item) -> {
-                if (key.equals("arguments")) normalized.put(key, Assistant.parse((String) item));
-                else if (key.equals("ref") || key.equals("zoom_ref")) normalized.put(key, item == null ? null : "<object-ref>");
-                else normalized.put(key, canonical(item));
+                if (key.equals("ref") || key.equals("zoom_ref")) {
+                    normalized.put(key, item == null ? null : "<object-ref>");
+                } else if (!key.equals("duration_ms")) {
+                    normalized.put(key, canonical(item));
+                }
             });
             return normalized;
         }
@@ -620,45 +894,65 @@ public class AssistantTest {
     }
 
     private static Map<String, Object> intent(String goal, String target, Object... options) {
-        var result = obj("goal", goal, "target", target);
+        var result = obj("goal", goal);
+        if (target != null) {
+            result.put("target", target);
+        }
         result.putAll(obj(options));
         return result;
     }
 
     private static Map<String, Object> declaration(Object... intents) {
-        return rawCall("declare_intents", "declare", Assistant.JSON.toJson(obj("intents", List.of(intents))));
+        return toolCall("declare_intents", obj("intents", List.of(intents)));
     }
 
-    private static Map<String, Object> call(String name, String id, int index, Object... params) {
-        var arguments = obj("intent", index);
-        arguments.putAll(obj(params));
-        return rawCall(name, id, Assistant.JSON.toJson(arguments));
+    private static Map<String, Object> toolCall(String name, Map<String, Object> arguments) {
+        return rawCall(name, name, Assistant.JSON.toJson(arguments));
     }
 
     private static Map<String, Object> rawCall(String name, String id, String arguments) {
         return obj("id", id, "type", "function", "function", obj("name", name, "arguments", arguments));
     }
 
-    private static Map<String, Object> arguments(Object item) {
-        return Assistant.parse(Assistant.string(Assistant.object(Assistant.object(item).get("function")), "arguments"));
+    private static Reply layerHits(String... ids) {
+        var results = Arrays.stream(ids)
+                .map(id -> obj("dataproduct", obj("dataproduct_id", id, "display", id))).toList();
+        return new Reply(200, obj("results", results));
     }
 
-    private static Object step(Object... entries) {
-        int size = entries.length;
-        Map<String, Object> outcomes = Map.of();
-        if (entries[size - 1] instanceof Map<?, ?> map && !map.containsKey("function")) {
-            outcomes = Assistant.object(entries[--size]);
-        }
-        var calls = Arrays.asList(entries).subList(0, size);
-        var results = new ArrayList<>();
-        for (Object raw : calls) {
-            String id = Assistant.string(Assistant.object(raw), "id");
-            results.add(obj("tool_call_id", id, "content", Assistant.JSON.toJson(outcomes.getOrDefault(id, ok(obj())))));
-        }
-        return obj("calls", calls, "results", results);
+    private static Reply layerDetails(String id, String title) {
+        return new Reply(200, obj(id, List.of(obj("name", id, "title", title))));
     }
 
-    private static Object ok(Object data) { return obj("ok", true, "data", data); }
+    private static Reply objectHits(String source, int count, String category, Object... hits) {
+        return new Reply(200, obj("results", List.of(hits),
+                "result_counts", List.of(obj("dataproduct_id", source, "count", count, "filterword", category))));
+    }
+
+    private static Map<String, Object> field(Map<String, Object> obj, String name) {
+        return Assistant.object(obj.get(name));
+    }
+
+    private static List<Map<String, Object>> results(Reply reply) {
+        eq(reply.status, 200);
+        return Assistant.list(reply.json().get("results")).stream().map(Assistant::object).toList();
+    }
+
+    private static List<String> layerIds(Map<String, Object> result) {
+        return Assistant.list(field(result, "data").get("layers")).stream()
+                .map(Assistant::object).map(layer -> Assistant.string(layer, "id")).toList();
+    }
+
+    private static Map<String, String> metaHeaders() {
+        return Map.of("X-AI-Debug", "meta", "X-AI-Turn-Id", TURN);
+    }
+
+    private static void counts(Reply reply, long model, long geo, long searches) {
+        var debug = field(reply.json(), "debug");
+        eq(debug.get("model_calls"), model);
+        eq(debug.get("geo_calls"), geo);
+        eq(debug.get("searches"), searches);
+    }
 
     private static Object completion(Object content, Object... calls) {
         return obj("id", "test", "model", "mock", "created", 1, "object", "chat.completion",
