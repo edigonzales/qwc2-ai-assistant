@@ -143,7 +143,6 @@ export default function AIChatPlugin() {
         setBusy(true);
         const turnTheme = store.getState().theme;
         const followUp = pendingIntents.current && pendingIntents.current.theme === turnTheme ? pendingIntents.current.items : [];
-        pendingIntents.current = null;
         try {
             const executeCommand = createQwcCommandExecutor(store, controller.signal);
             const history = turns.filter(({assistant, failed}) => assistant && !failed)

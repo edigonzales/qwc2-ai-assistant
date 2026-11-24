@@ -175,15 +175,17 @@ def read_intents(declaration, chat, parameters, schemas, valid):
             prior = chat.pending[index - 1]
             resumed.add(index)
 
-        if not target and goal not in MAP_READS and not (number and prior):
+        if not target and goal not in MAP_READS:
             raise ValueError("missing intent target")
         prior_words = words(prior.target) if prior else set()
-        if not words(target) <= message_words | prior_words:
+        allowed_words = message_words if number else message_words | prior_words
+        if not words(target) <= allowed_words:
             raise ValueError("unsupported intent target")
-        if number and not list_number_in_target(number, chat.message if prior else target):
+        if number and not list_number_in_target(number, target):
             raise ValueError("unspecified layer result number")
         if prior:
-            clarification = chat.message if words(target) <= prior_words else target
+            use_whole_message = len(declaration["intents"]) == 1 and words(target) <= prior_words
+            clarification = chat.message if use_whole_message else target
             target = clarification if prior_words <= words(clarification) else f"{prior.target} {clarification}"
             if not valid(target, parameters["properties"]["intents"]["items"]["properties"]["target"]):
                 raise ValueError("resumed intent target exceeds limits")

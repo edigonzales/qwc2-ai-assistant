@@ -253,14 +253,15 @@ class ChatTests(unittest.TestCase):
 
     def test_layer_clarification_cannot_resume_an_unstated_list_number(self):
         payload = {
-            "message": "Ja",
             "last_results": [{"id": "water.one", "title": "Fluss"}, {"id": "water.two", "title": "See"}],
             "pending": [{"goal": "add_layer", "target": "Wasser"}],
         }
-        with patch("app.get_geo") as geo:
-            response = self.send(payload, model(intent("add_layer", "Ja", layer_result_number=2, resume=1)))
-        self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
-        geo.assert_not_called()
+        for message in ["Ja", "Ja, und entferne Treffer 2"]:
+            with self.subTest(message=message), patch("app.get_geo") as geo:
+                response = self.send({**payload, "message": message},
+                                     model(intent("add_layer", "Ja", layer_result_number=2, resume=1)))
+            self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+            geo.assert_not_called()
 
     def test_independent_layer_succeeds_and_ambiguous_parcel_can_resume(self):
         parcel = object_filters[3]
@@ -307,6 +308,42 @@ class ChatTests(unittest.TestCase):
             self.assertEqual(upstream.call_count, 1)
             self.assertEqual(upstream.call_args.args[1]["searchtext"], "123 Brunnenthal Messen")
         self.assertEqual(len(self.requests), 2)
+
+    def test_failed_resumed_lookup_keeps_pending_and_independent_map_read(self):
+        pending = {"goal": "zoom_to_result", "target": "Grundstück 123 in Messen", "query": "123 Messen"}
+        payload = {"message": "Brunnenthal. Wo ist die Karte zentriert?", "theme_id": "test", "pending": [pending]}
+        for target, query in [("Brunnenthal", "123 Brunnenthal Messen"), (pending["target"], pending["query"])]:
+            with (self.subTest(target=target), patch("app.object_filters", return_value=[object_filters[3]]),
+                  patch("app.get_geo", side_effect=HTTPException(502, "locationUnavailable")) as geo):
+                response = self.send(payload, model(
+                    intent("zoom_to_result", target, args={"query": query}, resume=1),
+                    intent("get_map_state"),
+                ))
+            self.assertEqual(geo.call_args.args[1]["searchtext"], query)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {
+                "results": [{"intent": 1, "error": "locationUnavailable"},
+                            {"intent": 2, "command": {"type": "get_map_state"}}],
+                "pending": [pending],
+            })
+
+    def test_resumed_and_new_clarifications_stay_within_pending_limit(self):
+        payload = {
+            "message": "Nummer 1. Gehe zum Punkt und zeige die Karte.",
+            "last_results": [{"id": "water.one", "title": "Fluss"}],
+            "pending": [{"goal": "add_layer", "target": f"Layer {i}"} for i in range(limits["calls"])],
+        }
+        with patch("app.get_geo", return_value={"water.one": [{"name": "water.one", "title": "Fluss"}]}):
+            response = self.send(payload, model(
+                intent("add_layer", "Nummer 1", layer_result_number=1, resume=1),
+                intent("zoom_to_lv95", "Punkt"),
+                intent("add_layer", "Karte"),
+            ))
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        new = sum("clarification" in result for result in body["results"])
+        self.assertEqual(new, 2)
+        self.assertEqual(len(body["pending"]) + new, limits["calls"])
 
     def test_resume_address_without_prior_search_uses_the_clarified_address(self):
         address = "Langendorfstrasse 19b Solothurn"
@@ -548,6 +585,17 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(len(lists[0]) + len(lists[1]), 10)
         self.assertEqual(len(set(lists[0] + lists[1])), 10)
         self.assertEqual(lists[1][0], "grundwasser.0")
+
+    def test_related_search_term_still_requires_relevance_to_primary_topic(self):
+        intent_call = intent("present_layer_results", "Hochwassergefahr",
+                             args={"query": "Hochwasser", "alternative": "Fliesstiefen"})
+        ranking = httpx.Response(200, json=completion(calls=[call("select_layers", {"ids": []})]))
+        catalog = [{"results": []}, {"results": [layer_hit("fixture.unrelated", "Anderes Thema")]}]
+        with patch("app.get_geo", side_effect=catalog):
+            response = self.send({"message": "Suche Karten zur Hochwassergefahr."}, model(intent_call), ranking)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["results"][0]["data"]["layers"], [])
+        self.assertEqual(json.loads(self.requests[1]["messages"][1]["content"])["topic"], "Hochwasser")
 
     def test_server_limits_searches_per_turn(self):
         names = ("Hübeli", "Passwang", "Belchen", "Chilchberg")

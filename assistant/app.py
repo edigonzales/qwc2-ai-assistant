@@ -648,6 +648,7 @@ async def layer_candidates(request, goal, query, alternative):
     layers = (await chat_lookup(request, "search_layers", query=query))["layers"]
     if not layers and alternative and alternative != query:
         layers = (await chat_lookup(request, "search_layers", query=alternative))["layers"]
+        return await rank_layers(request, goal, query, layers) if layers else []
     if len(layers) > 1:
         return await rank_layers(request, goal, query, layers)
     return layers
@@ -788,9 +789,10 @@ async def chat(request: Request):
         response["reply"] = reply
     elif not intents:
         response["reply"] = "Was möchtest du auf der Karte tun?"
-    resumed = {intent["resume"] for intent in intents if "resume" in intent}
+    resumed = [(intent["resume"], result) for intent, result in zip(intents, results) if "resume" in intent]
     if resumed:
+        continued = {number for number, result in resumed if "error" not in result}
         available = limits["calls"] - sum("clarification" in result for result in results)
         response["pending"] = [item.model_dump(exclude_none=True) for index, item in enumerate(payload.pending, 1)
-                               if index not in resumed][:available]
+                               if index not in continued][:available]
     return {**response, **browser_debug(request)}
