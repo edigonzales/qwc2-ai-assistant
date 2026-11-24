@@ -189,13 +189,11 @@ def read_intents(declaration, chat, parameters, schemas, valid):
                 raise ValueError("resumed intent target exceeds limits")
         intent["target"] = target
 
-        if goal in OBJECT_GOALS and prior and (query := args.get("query")):
-            prior_query = getattr(prior, "query", None)
+        if goal in OBJECT_GOALS and prior and prior.query and (query := args.get("query")):
             query_words = words(query)
             new_words = words(clarification) - prior_words
-            if ((prior_query and not words(prior_query) <= query_words)
-                    or (not prior_query and not prior_words & query_words)):
-                query = f"{prior_query or prior.target} {clarification}"
+            if not words(prior.query) <= query_words:
+                query = f"{prior.query} {clarification}"
             elif new_words and not new_words & query_words:
                 query = f"{query} {clarification}"
             if not valid(query, schemas["search_objects"]["properties"]["query"]):

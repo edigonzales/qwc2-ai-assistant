@@ -308,6 +308,24 @@ class ChatTests(unittest.TestCase):
             self.assertEqual(upstream.call_args.args[1]["searchtext"], "123 Brunnenthal Messen")
         self.assertEqual(len(self.requests), 2)
 
+    def test_resume_address_without_prior_search_uses_the_clarified_address(self):
+        address = "Langendorfstrasse 19b Solothurn"
+        point = [2605899, 1229278]
+        label = "Langendorfstrasse 19b, 4500 Solothurn (Adresse)"
+        body = {"results": [object_hit(address_layer, label, point + point)],
+                "result_counts": [{"dataproduct_id": address_layer, "count": 1, "filterword": "Adresse"}]}
+        payload = {"message": address, "theme_id": "test",
+                   "pending": [{"goal": "zoom_to_result", "target": "zur Adresse"}]}
+        with (patch("app.object_filters", return_value=[address_layer]),
+              patch("app.get_geo", return_value=body) as geo):
+            response = self.send(payload, model(
+                intent("zoom_to_result", address, args={"query": address}, resume=1)
+            ))
+        self.assertEqual(response.status_code, 200)
+        result, = response.json()["results"]
+        self.assertEqual(result["command"]["coordinates"], point)
+        self.assertEqual(geo.call_args.args[1]["searchtext"], address.lower())
+
     def test_object_search_shows_candidates_without_navigating(self):
         parcel = object_filters[3]
         body = {"results": [object_hit(parcel, "GB-Nr: 2084 - Solothurn (Liegenschaft)")],
