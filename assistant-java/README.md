@@ -23,7 +23,7 @@ und Anfragen. `Schemas.java` definiert die Java-seitigen Feldregeln und
 Arbeitsgrenzen. JBang übernimmt die Limits und `text-data.json` in die
 Artefakte. `text-data.json` liefert HTML-Zeichenreferenzen und Case Folding
 aus Unicode 15.0 für dieselbe Textnormalisierung wie in FastAPI.
-Quellen und Lizenzen stehen in der Ressource.
+Quellen und Lizenzen stehen in der Ressource. [WHATWG-Zeichenreferenzen](https://html.spec.whatwg.org/entities.json) · [Unicode Case Folding](https://www.unicode.org/Public/15.0.0/ucd/CaseFolding.txt)
 
 ## Lokal starten
 
@@ -110,6 +110,37 @@ python3.12 -m venv /tmp/qwc-parity-venv
 /tmp/qwc-parity-venv/bin/pip install -r assistant/requirements.txt
 jbang assistant-java/AssistantTest.java /tmp/qwc-parity-venv/bin/python
 ```
+
+## Messung
+
+Stand `e21f44f` auf Apple M1, macOS 15.8.1 und arm64. Verwendet wurden
+JBang 0.138.0, Temurin 25.0.5.1 und GraalVM CE 25.0.4. Je Variante wurden
+fünf Prozessstarts im Abstand von 5 ms auf `/healthz` geprüft.
+Der Leerlauf-RSS wurde nach einer Sekunde erfasst. Die erste Geo-Suche
+nach Altlasten lief über HTTPS und enthält Netzwerklatenz.
+Die Zeiten und der RSS sind Mediane.
+
+| Variante | Artefakt in Bytes | Bis Healthcheck | RSS im Leerlauf | Erste Geo-Suche | Funktionstest |
+|---|---:|---:|---:|---:|---|
+| Fat-JAR | 363’410 | 241,3 ms | 82,9 MiB | 274,6 ms | PASS |
+| Leyden | 32’266’168 | 223,5 ms | 95,8 MiB | 234,5 ms | PASS |
+| Native Image | 27’570’512 | 20,6 ms | 20,8 MiB | 154,7 ms | PASS |
+
+Leyden umfasst das portable JAR, seine Bibliotheken und 31’899’648 Bytes
+AOT-Cache. Das JVM-Protokoll bestätigte `Opened AOT cache` und
+`Using AOT-linked classes: true`. Das Native Image wurde in rund
+59 Sekunden gebaut. GraalVM meldete Warnungen zu veralteten Optionen
+und zur experimentellen Ressourcenoption.
+
+JBang und alle drei Artefakte starteten lokal. Die Artefakttests prüften alle
+fünf Geo-Operationen, die Ablehnung eines alten Chat-Requests und den
+Adresszoom mit sichtbaren Diagnosezählern. Die HTTP-Paritätstests ergaben
+16 erfolgreiche Gruppen und 79 kontrollierte Vergleiche mit FastAPI.
+
+In QWC2 ging der Adresszoom zur Langendorfstrasse 19b mit einem Chat-POST
+und einem Modellaufruf nach `[2605899, 1229278]`. Der kombinierte Auftrag
+lud den Altlasten-Layer und zoomte auf Grundstück 2084. **Details** zum
+Altlasten-Layer verwendete den direkten Geo-Endpunkt.
 
 ## Historische Messung für die frühere Chat-Schnittstelle
 
