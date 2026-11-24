@@ -194,7 +194,7 @@ wieder entfernen, die Fachantwort `Au` sowie eine verneinte Suche und eine
 hypothetische Zoomfrage ohne Kartenänderung geprüft. Ein früherer Live-Lauf
 hatte beim Formulieren einer Rückfrage einen Timeout der Inferenz-API.
 
-## README-Diagramme
+## Historische README-Diagramme zur Browser-Tool-Schleife
 
 Die unabhängige Nachprüfung von `45800190fcb22912dbb74aeb5b5ab4cfffab6021`
 mit OpenCode 2.0.28 und `deepseek/deepseek-flash` ergab **PASS**. Sie
@@ -203,6 +203,8 @@ POST je Suchaufruf und die Anzeige der Kartenbestätigungen nach der
 Tool-Schleife. Beide Mermaid-Diagramme wurden in draw.io gerendert und
 visuell geprüft. `git diff --check` war erfolgreich. Die Darstellung im
 GitHub-Renderer und neue Live-Tests lagen ausserhalb des Dokumentationsreviews.
+Der Umbau der Chat-Orchestrierung in Commit `207ee67` ersetzte die
+Mermaid-Diagramme durch die Ablaufbeschreibung in der Haupt-README.
 
 ## Chat-Orchestrierung in FastAPI
 
