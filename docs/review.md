@@ -272,3 +272,29 @@ Chat-POST und einem Modellaufruf. **Details** zum Kataster der belasteten
 Standorte lieferte die Layer-ID `ch.so.afu.altlasten.standorte` über einen
 direkten Geo-Aufruf. Beim Ranking der Gemeindegrenzen antwortete Infomaniak
 zweimal mit HTTP 503. Webpack meldete die Grössenwarnungen für das QWC2-Bundle.
+
+## Abnahme für main
+
+Basis `f3d8e9972a5de131d1ab8dfd978901c2583f3b46`, FastAPI-Stand
+`a8bc76ac8171b8e7aae54a176e5144a3da1dfc82`. **PASS** im unabhängigen
+OpenCode-Review mit Version 2.0.28 und `deepseek/deepseek-flash`. Der
+Reviewer führte 31 Python- und 34 Node-Tests aus. Die strikte Prüfung
+der Zielwörter kann eine vom Modell umformulierte Absicht mit
+`502 invalidModelResponse` zurückweisen.
+
+Die lokalen 31 Python- und
+34 Node-Tests bestanden. Beide Docker-Images wurden gebaut und gestartet.
+Bei 131’073 Bytes lieferten Proxy und FastAPI HTTP 413. Bei 131’072 Bytes
+erreichte die Anfrage jeweils die Argumentprüfung.
+
+- Die Langendorfstrasse 19b wurde mit einem Chat-POST und einem Modellaufruf
+  in 8,8 Sekunden bei `[2605899, 1229278]` in EPSG:2056 zentriert.
+- Der kombinierte Auftrag aktivierte das Altlasten-Kataster und zoomte
+  auf die Ausdehnung von Grundstück 2084 in Solothurn. Ein Chat-POST,
+  ein Modellaufruf und drei Geo-Werkzeuge dauerten zusammen 20,1 Sekunden
+  bis zur UI-Prüfung.
+- **Details** zum Altlasten-Kataster lieferte die verifizierte Layer-ID
+  `ch.so.afu.altlasten.standorte` mit einem direkten Geo-Aufruf.
+- Das Live-Ranking zu Gemeindegrenzen lieferte in diesem Lauf drei
+  Katalogtreffer mit zwei Modellaufrufen. Der zuvor dokumentierte
+  Provider-Fehler HTTP 503 trat in diesem Lauf nicht auf.
