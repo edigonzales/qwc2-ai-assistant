@@ -254,3 +254,21 @@ für die angeforderten 1:1000. Geo-Werkzeuge werden pro Chat-Zug gezählt.
 Der separate Zugriff auf die Themenkonfiguration beim Start des
 Suchcaches ist darin nicht enthalten.
 Die vollständige frühere Messreihe mit zehn Fachfragen wurde nicht wiederholt.
+
+## Gemeinsame Limits und FastAPI-Schemas
+
+Basis `928b799ae9eecc18e2ccde1bbd8edf87a6bd868e`, geprüft
+`9a4d015b428ca8d27d6ff197d9b9e702ff5fc6c9`. **PASS** mit OpenCode 2.0.28
+und `deepseek/deepseek-flash` im separaten Worktree. Der Review führte
+31 Python- und 34 Node-Tests aus. Der lokale Vergleich mit der Basis
+ergab identische JSON-Schemas für die fünf Geo-Aufrufe, beide
+Modellwerkzeuge und beide API-Anfragemodelle.
+
+Beide Docker-Images wurden gebaut und lokal gestartet. Proxy und FastAPI
+gaben bei 131’073 Bytes HTTP 413 zurück. Bei 131’072 Bytes erreichte die
+Anfrage jeweils die Inhaltsprüfung. Chrome bestätigte den Zoom zur
+Langendorfstrasse 19b auf `[2605899, 1229278]` in EPSG:2056 mit einem
+Chat-POST und einem Modellaufruf. **Details** zum Kataster der belasteten
+Standorte lieferte die Layer-ID `ch.so.afu.altlasten.standorte` über einen
+direkten Geo-Aufruf. Beim Ranking der Gemeindegrenzen antwortete Infomaniak
+zweimal mit HTTP 503. Webpack meldete die Grössenwarnungen für das QWC2-Bundle.
