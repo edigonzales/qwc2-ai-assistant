@@ -203,3 +203,54 @@ POST je Suchaufruf und die Anzeige der Kartenbestätigungen nach der
 Tool-Schleife. Beide Mermaid-Diagramme wurden in draw.io gerendert und
 visuell geprüft. `git diff --check` war erfolgreich. Die Darstellung im
 GitHub-Renderer und neue Live-Tests lagen ausserhalb des Dokumentationsreviews.
+
+## Chat-Orchestrierung in FastAPI
+
+Basis `8b35a19fd05ca63d4c0d7bc9d7003a27746ed65a`.
+
+Unabhängige Reviews mit OpenCode 2.0.28 und `deepseek/deepseek-flash`.
+Der Erstreview von `207ee6773e89b47528d7fdaaa005a7f18d0e7235` ergab
+**FAIL**. Die Nachprüfungen
+`2ab20491f66f2e7e2773c9d2e05a0ac5c886c783` und
+`5eff16c7943d0f7783663c63e858075731152892` bestätigten die begrenzte
+Trefferliste und die korrigierte Adresssuche. Die Korrekturen erhalten
+offene Aufträge bei vorübergehenden Fehlern, binden Treffernummern an
+ihren Auftrag und begrenzen die Zahl offener Rückfragen auf acht.
+Eine Suche mit einem Alternativbegriff liefert nur Treffer, die das
+Modell dem ursprünglichen Thema zuordnet.
+Die technische Nachprüfung von `01f42082fe4ff65822111bf267d88886c40a8eae`
+ergab **PASS** mit 31 Python- und 34 Node-Tests. Die abschliessende
+Prompt-Nachprüfung von `03ab2abb9c090400de4a5ed391833bb70571dc37` ergab
+ebenfalls **PASS**.
+
+Lokal bestanden 31 Python-Tests, 34 Node-Tests, gezieltes ESLint und der
+Produktionsbuild. Webpack meldete Grössenwarnungen für das QWC2-Bundle.
+Im Live-Test mit Chrome, Infomaniak und geo.so.ch hatte jede der folgenden
+Nachrichten genau einen Browser-POST an `/assistant-api/v1/chat`.
+Die Zeiten stammen aus zwei Durchläufen vom Absenden bis zur UI-Prüfung.
+
+| Auftrag | Modellaufrufe | Geo-Werkzeuge | Browser | Ergebnis |
+|---|---:|---:|---:|---|
+| Langendorfstrasse 19b, Solothurn | 1 | 1 | 5,4–5,9 s | EPSG:2056 `[2605899, 1229278]`, QWC2-Massstab 1:945 |
+| Grundstück 2084 suchen und Karte stehen lassen | 1 | 1 | 3,6–4,2 s | Ein auswählbarer Treffer, Mittelpunkt unverändert |
+| Altlasten laden und zu Grundstück 2084 zoomen | 1 | 3 | 3,9–14,5 s | KBS aktiv, Zoom auf `[2607721, 1228805, 2607775, 1228863]` |
+| Grundstück 123 in Messen | 1 | 1 | 2,6–3,6 s | Vier auswählbare Treffer und Rückfrage |
+| Rückfrage mit «Brunnenthal» beantworten | 1 | 1 | 1,5–3,3 s | Erneute Suche und Zoom auf die bestätigte Grundstücksausdehnung |
+| Gewässerschutzbereich am Klosterplatz 1 | 2 | 3 | 2,7–7,0 s | Data Service liefert `typ = Au` |
+| Karten zu Wasser und Grundwasser suchen | 3 | 2 | 12,0–32,7 s | Im abschliessenden Durchlauf fünf Layer je Thema |
+
+Ein separater Chrome-Test prüfte mit simulierten Chatantworten und echter
+QWC2-Karte die Befehlsreihenfolge, Kartenabfragen nach einer Aktion, Zoom
+ohne Massstab, Abbruch und Themenwechsel bei verspäteter Antwort.
+Die direkten Aktionen **Details** und **Anzeigen** für Gemeindegrenzen
+funktionierten mit je einem Geo-Aufruf.
+Die Auftragsfolge «Gehe bitte zur Adresse» und danach
+«Langendorfstrasse 19b in Solothurn» ergab zuerst eine Rückfrage mit null
+Geo-Werkzeugen, dann den bestätigten Punkt mit einem Modellaufruf und
+einem Geo-Werkzeug. In einem früheren Kontrolllauf lief der Modellaufruf
+in die Provider-Zeitgrenze.
+Der Kartenmassstab von 1:945 ergibt sich aus den verfügbaren Zoomstufen
+für die angeforderten 1:1000. Geo-Werkzeuge werden pro Chat-Zug gezählt.
+Der separate Zugriff auf die Themenkonfiguration beim Start des
+Suchcaches ist darin nicht enthalten.
+Die vollständige frühere Messreihe mit zehn Fachfragen wurde nicht wiederholt.
