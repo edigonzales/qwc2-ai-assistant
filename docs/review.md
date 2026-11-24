@@ -194,7 +194,7 @@ wieder entfernen, die Fachantwort `Au` sowie eine verneinte Suche und eine
 hypothetische Zoomfrage ohne Kartenänderung geprüft. Ein früherer Live-Lauf
 hatte beim Formulieren einer Rückfrage einen Timeout der Inferenz-API.
 
-## README-Diagramme
+## Historische README-Diagramme zur Browser-Tool-Schleife
 
 Die unabhängige Nachprüfung von `45800190fcb22912dbb74aeb5b5ab4cfffab6021`
 mit OpenCode 2.0.28 und `deepseek/deepseek-flash` ergab **PASS**. Sie
@@ -203,6 +203,8 @@ POST je Suchaufruf und die Anzeige der Kartenbestätigungen nach der
 Tool-Schleife. Beide Mermaid-Diagramme wurden in draw.io gerendert und
 visuell geprüft. `git diff --check` war erfolgreich. Die Darstellung im
 GitHub-Renderer und neue Live-Tests lagen ausserhalb des Dokumentationsreviews.
+Der Umbau der Chat-Orchestrierung in Commit `207ee67` ersetzte die
+Mermaid-Diagramme durch die Ablaufbeschreibung in der Haupt-README.
 
 ## Chat-Orchestrierung in FastAPI
 
@@ -362,3 +364,13 @@ mit Diagnosezählern. Die Messung umfasst fünf Starts je Artefaktvariante.
 Java begrenzt die Providerantwort zusätzlich auf 4 MiB. Lasttests und
 Native-Builds auf anderen Plattformen stehen aus.
 [Startbefehle und Messwerte](../assistant-java/README.md#messung)
+
+## Architektur-Dokumentation für FastAPI und Java
+
+Basis `33538d975ba13d3f8cebfddd5c1194965a5c02f9`, geprüft
+`d17f30f86743e0e90045c58b6313b3b0caa5be76`. **PASS** mit
+OpenCode 2.0.28 und `deepseek/deepseek-flash`. Proxy-Routen,
+Java-Port, Tool-Schemas, Ressourceneinbindung und historische Zuordnung
+der Mermaid-Diagramme wurden mit dem Code und der Git-Historie
+abgeglichen. Lokal bestanden `git diff --check` und die Prüfung von
+20 lokalen Links und Markdown-Ankern. Der Diff betrifft die Dokumentation.

@@ -6,14 +6,18 @@ Suchdienste von geo.so.ch. QWC2 stammt aus dem
 und verwendet dessen unveränderte Version `qwc2-lts@2026.0.30`. Die BSD-Lizenz
 steht in [frontend/LICENSE](frontend/LICENSE).
 
-Ein experimentelles Java-25-Backend steht parallel zu FastAPI zur Verfügung.
-[Java-Start und Prüfungen](assistant-java/README.md)
-
 ## Architektur
 
-Der QWC2-Webserver leitet `POST /assistant-api/v1/chat` an
-`POST /api/v1/chat` in FastAPI weiter. Er ist der Same-Origin-Proxy.
-FastAPI erkennt den Auftrag mit dem Infomaniak-Modell und fragt die
+Der QWC2-Webserver ist der Same-Origin-Proxy. Er leitet
+`POST /assistant-api/v1/chat` an `/api/v1/chat` und
+`POST /assistant-api/v1/geo` an `/api/v1/geo` im gewählten Backend weiter.
+FastAPI ist das Standardbackend. Wenn du den QWC2-Webserver lokal mit
+`npm --prefix frontend run start:remote` startest, wählst du das
+experimentelle Java-25-Backend mit
+`ASSISTANT_API_ORIGIN=http://127.0.0.1:8085`.
+[Java lokal starten](assistant-java/README.md#lokal-starten)
+
+Das Backend erkennt den Auftrag mit dem Infomaniak-Modell und fragt die
 Solothurner Suche, `weblayers` oder den Data Service direkt ab. Der
 Browser verarbeitet die Antwort in der gelieferten Reihenfolge und führt
 Kartenbefehle über QWC2 aus. Der Chatverlauf lebt im Browser bis zum Neuladen.
@@ -27,8 +31,8 @@ gewohnten Dienste.
 
 1. Der Browser sendet den Text und die aktuelle Thema-ID einmal an
    `/assistant-api/v1/chat`. Der QWC2-Webserver reicht die Anfrage an
-   FastAPI weiter.
-2. FastAPI sendet dem Modell den Systemprompt mit allen unterstützten
+   das Backend weiter.
+2. Das Backend sendet dem Modell den Systemprompt mit allen unterstützten
    Absichten und Beispielen. Im Userprompt steht der eingegebene Text.
    Wenn Kontext vorhanden ist, steht er separat bezeichnet daneben.
    Das Modell soll die gewünschte Absicht und den Suchtext liefern.
@@ -38,9 +42,9 @@ gewohnten Dienste.
    {"intents":[{"goal":"zoom_to_result","target":"Solothurn zur Langendorfstrasse 19b","args":{"query":"Langendorfstrasse 19b Solothurn"}}]}
    ```
 
-3. FastAPI prüft die Modellargumente und sucht die Adresse bei `geo.so.ch`.
+3. Das Backend prüft die Modellargumente und sucht die Adresse bei `geo.so.ch`.
    Ein vollständiger, eindeutiger, exakter Treffer liefert die Koordinaten.
-   FastAPI erstellt daraus den Kartenbefehl und gibt ihn mit den Treffern
+   Das Backend erstellt daraus den Kartenbefehl und gibt ihn mit den Treffern
    als Antwort auf den ursprünglichen Chat-Aufruf zurück. Der Kartenbefehl
    für diese Adresse lautet:
 
@@ -123,7 +127,7 @@ Suche fort. Kartenstand und sichtbare Layer liest QWC2 zum Zeitpunkt, an dem
 es den entsprechenden Lesebefehl ausführt.
 
 Eine eindeutige Adressnavigation benötigt einen Modellaufruf. Bei mehreren
-Kartentreffern kann FastAPI das Modell zusätzlich um deren Reihung bitten.
+Kartentreffern kann das Backend das Modell zusätzlich um deren Reihung bitten.
 Pro Nachricht sind höchstens acht deklarierte Aufträge, drei Karten- oder
 Objektsuchen und vier Modellaufrufe möglich. Die Objektsuche liefert bis zu
 25 und die Kartentrefferliste bis zu zehn Einträge.
@@ -132,11 +136,11 @@ Objektsuchen und vier Modellaufrufe möglich. Die Objektsuche liefert bis zu
 ## Einstiegspunkte im Code
 
 - Die Chat-Seitenleiste rendert Nachrichten, Treffer und Direktaktionen. [AIChatPlugin.jsx](frontend/js/plugins/AIChatPlugin.jsx)
-- FastAPI prüft die Argumente für Geo-Aufrufe und Modellantworten anhand seiner Schemas. [schemas.py](assistant/schemas.py)
-- Browser und FastAPI verwenden dieselben Grenzen für Text und Verlauf. Proxy und FastAPI teilen das Limit für die Anfragegrösse. [limits.json](shared/limits.json)
+- Beide Backends prüfen die Argumente für Geo-Aufrufe und Modellantworten anhand ihrer Schemas. [FastAPI](assistant/schemas.py) · [Java](assistant-java/Schemas.java)
+- Browser, Proxy, FastAPI und Java beziehen die jeweils benötigten Grössenlimits aus derselben Datei. Gepackte Java-Artefakte übernehmen die Werte beim Build. [limits.json](shared/limits.json)
 - Host- und Containerbetrieb nutzen dieselben Proxy-Routen für Live-Karte, Geo-Werkzeuge und Chat. [remote.cjs](frontend/server/remote.cjs)
-- Die Absichtserkennung enthält den Systemprompt, den Userprompt mit Kontext und das Schema für die Modellantwort. [intents.py](assistant/intents.py)
-- FastAPI führt die kantonalen Abfragen aus und erstellt die Kartenbefehle. [app.py](assistant/app.py)
+- Die Absichtserkennung erstellt den Modellkontext und prüft die Modellantwort. [FastAPI](assistant/intents.py) · [Java](assistant-java/Intents.java)
+- Die Chat-Steuerung koordiniert die kantonalen Abfragen und erstellt die Kartenbefehle. [FastAPI](assistant/app.py) · [Java](assistant-java/ChatTurn.java)
 
 ## Prüfen
 
@@ -168,7 +172,7 @@ docker compose exec -T assistant env -u INFOMANIAK_API_TOKEN -u INFOMANIAK_PRODU
 6. Frage «In welchem Gewässerschutzbereich liegt Klosterplatz 1 in Solothurn?».
    Die Antwort nennt den am aufgelösten Punkt abgefragten Bereich `Au`.
 
-## Debugging
+## Debugging im Standardbetrieb
 
 Im Netzwerk-Tab siehst du pro Nachricht einen Aufruf an
 `/assistant-api/v1/chat`. Direkte Klicks auf Kartentreffer können

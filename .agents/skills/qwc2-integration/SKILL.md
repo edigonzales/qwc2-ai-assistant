@@ -20,9 +20,11 @@ FeatureCollection is a successful query; a failed request cannot establish
 that there are no matches.
 
 Keep remote proxy rules explicit: public GET/HEAD for approved Solothurn routes
-and fixed same-origin POST routes for chat and geo reads to FastAPI. Never
-forward cookies, credentials or arbitrary URLs. Keep tool inputs and results
-bounded and follow the existing shared tool schemas.
+and fixed same-origin POST routes for chat and geo reads to the configured
+backend. Never forward cookies, credentials or arbitrary URLs. Keep tool inputs
+and results bounded. Validate tool arguments against the allowlisted schemas in
+the selected backend. Keep shared text, history and request limits in
+`shared/limits.json`.
 
 Review actual map-state changes in a browser, not just Redux action calls.
 Use the normal LayerTree and QWC URL state as observable integration points.
