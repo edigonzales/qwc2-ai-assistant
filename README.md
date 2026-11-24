@@ -136,11 +136,11 @@ Objektsuchen und vier Modellaufrufe möglich. Die Objektsuche liefert bis zu
 ## Einstiegspunkte im Code
 
 - Die Chat-Seitenleiste rendert Nachrichten, Treffer und Direktaktionen. [AIChatPlugin.jsx](frontend/js/plugins/AIChatPlugin.jsx)
-- FastAPI prüft die Argumente für Geo-Aufrufe und Modellantworten anhand seiner Schemas. [schemas.py](assistant/schemas.py)
-- Browser, Proxy, FastAPI und Java beziehen die jeweils benötigten Grössenlimits aus derselben Datei. [limits.json](shared/limits.json)
+- Beide Backends prüfen die Argumente für Geo-Aufrufe und Modellantworten anhand ihrer Schemas. [FastAPI](assistant/schemas.py) · [Java](assistant-java/Schemas.java)
+- Browser, Proxy, FastAPI und Java beziehen die jeweils benötigten Grössenlimits aus derselben Datei. Gepackte Java-Artefakte übernehmen die Werte beim Build. [limits.json](shared/limits.json)
 - Host- und Containerbetrieb nutzen dieselben Proxy-Routen für Live-Karte, Geo-Werkzeuge und Chat. [remote.cjs](frontend/server/remote.cjs)
-- Die Absichtserkennung enthält den Systemprompt, den Userprompt mit Kontext und das Schema für die Modellantwort. [intents.py](assistant/intents.py)
-- FastAPI führt die kantonalen Abfragen aus und erstellt die Kartenbefehle. [app.py](assistant/app.py)
+- Die Absichtserkennung erstellt den Modellkontext und prüft die Modellantwort. [FastAPI](assistant/intents.py) · [Java](assistant-java/Intents.java)
+- Die Chat-Steuerung koordiniert die kantonalen Abfragen und erstellt die Kartenbefehle. [FastAPI](assistant/app.py) · [Java](assistant-java/ChatTurn.java)
 
 ## Prüfen
 
