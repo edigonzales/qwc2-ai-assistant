@@ -5,7 +5,6 @@ import MapUtils from 'qwc2/utils/MapUtils';
 
 import {themeLayerRestorer} from '../../themeLayerRestorer';
 import {mapLayers} from './layers.mjs';
-import {createTurnTools} from './tools.mjs';
 
 function restore(name, theme, signal) {
     return new Promise((resolve, reject) => {
@@ -24,76 +23,81 @@ function restore(name, theme, signal) {
     });
 }
 
-function dispatchPoint(store, point, scale) {
-    const {scales} = store.getState().map;
-    const boundedScale = Math.max(scales.at(-1), Math.min(scales[0], scale));
-    store.dispatch(zoomToPoint(point, MapUtils.computeZoom(scales, boundedScale), 'EPSG:2056'));
-}
+function zoomView(store, {coordinates, target_scale: targetScale, bbox, crs, label}) {
+    const {map} = store.getState();
+    if (!map.size?.width || !map.size?.height || map.scales.length < 2) throw new Error('mapNotReady');
 
-export function zoomToObject(store, {bbox, label}) {
-    if (!Array.isArray(bbox) || bbox.length !== 4 || !bbox.every(Number.isFinite)) throw new Error('invalidLocation');
-    const [west, south, east, north] = bbox;
-    if (west < 2480000 || east > 2840000 || south < 1070000 || north > 1300000 ||
-        west > east || south > north) throw new Error('invalidLocation');
-    const {map, theme} = store.getState();
-    if (!theme?.current || theme.switching || !map.size?.width || !map.size?.height || map.scales.length < 2) {
-        throw new Error('mapNotReady');
-    }
-    if (west === east && south === north) {
-        dispatchPoint(store, [west, south], 1000);
+    let target;
+    let requestedZoom;
+    if (coordinates) {
+        const {scales} = map;
+        requestedZoom = targetScale === undefined ? map.zoom :
+            MapUtils.computeZoom(scales, Math.max(scales.at(-1), Math.min(scales[0], targetScale)));
+        store.dispatch(zoomToPoint(coordinates, requestedZoom, crs));
+        target = CoordinatesUtils.reproject(coordinates, crs, map.projection);
     } else {
-        store.dispatch(zoomToExtent(bbox, 'EPSG:2056'));
-        // QWC can round to a tighter discrete zoom. Fit the native view with one wider step if necessary.
+        const extent = CoordinatesUtils.reprojectBbox(bbox, crs, map.projection);
+        target = [(extent[0] + extent[2]) / 2, (extent[1] + extent[3]) / 2];
+        store.dispatch(zoomToExtent(bbox, crs));
+        // QWC can select a tighter discrete zoom. Use one wider step when needed.
         const next = store.getState().map;
-        const extent = CoordinatesUtils.reprojectBbox(bbox, 'EPSG:2056', next.projection);
         const resolution = MapUtils.computeForZoom(next.resolutions, next.zoom);
         if (next.zoom >= 1 && (extent[2] - extent[0] > next.size.width * resolution ||
             extent[3] - extent[1] > next.size.height * resolution)) {
-            store.dispatch(zoomToExtent(bbox, 'EPSG:2056', -1));
+            store.dispatch(zoomToExtent(bbox, crs, -1));
         }
     }
+
     const next = store.getState().map;
-    return {label, center: next.center, scale: Math.round(MapUtils.computeForZoom(next.scales, next.zoom))};
+    const scale = MapUtils.computeForZoom(next.scales, next.zoom);
+    if (!Number.isFinite(scale) || (requestedZoom !== undefined && next.zoom !== requestedZoom) ||
+        !next.center?.every((value, index) => Math.abs(value - target[index]) < 0.01)) {
+        throw new Error('mapActionFailed');
+    }
+    return {label, center: CoordinatesUtils.reproject(next.center, next.projection, crs), scale: Math.round(scale)};
 }
 
-export function createQwcTurnTools(store, options = {}) {
+export function zoomToObject(store, {bbox, label}) {
+    const [west, south, east, north] = bbox;
+    const {theme} = store.getState();
+    if (!theme?.current || theme.switching) throw new Error('mapNotReady');
+    const location = west === east && south === north ? {coordinates: [west, south], target_scale: 1000} : {bbox};
+    return zoomView(store, {...location, crs: 'EPSG:2056', label});
+}
+
+export function createQwcCommandExecutor(store, signal) {
     const layers = mapLayers(store, {
         roles: LayerRole, addThemeSublayer, changeLayerProperty, removeLayer, restore, baseUrl: window.location.href
     });
-
     let boundsBeforeZoom;
 
-    function getState() {
-        const {theme, map} = store.getState();
-        if (!theme.current || theme.switching || !map.size) throw new Error('mapNotReady');
-        const scale = MapUtils.computeForZoom(map.scales, map.zoom);
-        const extent = map.bbox?.bounds;
-        return {
-            theme: {id: theme.current.id, title: theme.current.title},
-            crs: map.projection,
-            center: map.center,
-            scale: Number.isFinite(scale) ? Math.round(scale) : null,
-            extent: extent === boundsBeforeZoom ? null : extent ?? null
-        };
-    }
-
-    function zoom({easting, northing, scale}) {
-        layers.checkTheme(options.signal);
-        const {map} = store.getState();
-        if (!map.size || map.scales.length < 2) throw new Error('mapNotReady');
-        // The view reports the new extent asynchronously after the reducer centers the map.
-        boundsBeforeZoom = map.bbox?.bounds;
-        dispatchPoint(store, [easting, northing], scale);
-        const state = getState();
-        return {crs: state.crs, center: state.center, scale: state.scale};
-    }
-
-    function zoomObject({bbox, label}) {
-        layers.checkTheme(options.signal);
-        boundsBeforeZoom = store.getState().map.bbox?.bounds;
-        return zoomToObject(store, {bbox, label});
-    }
-
-    return createTurnTools({...options, themeId: store.getState().theme?.current?.id,
-        map: {...layers, getState, zoom, zoomObject}});
+    return function executeCommand(command) {
+        layers.checkTheme(signal);
+        switch (command.type) {
+        case 'add_layer': return layers.addLayer(command.layer, signal);
+        case 'remove_layer': return layers.removeLayer(command.layer, signal);
+        case 'get_visible_layers': return layers.getVisibleLayers();
+        case 'get_map_state': {
+            const {theme, map} = store.getState();
+            if (!map.size?.width || !map.size?.height) throw new Error('mapNotReady');
+            const scale = MapUtils.computeForZoom(map.scales, map.zoom);
+            const extent = map.bbox?.bounds;
+            return {
+                theme: {id: theme.current.id, title: theme.current.title},
+                crs: map.projection,
+                center: map.center,
+                scale: Number.isFinite(scale) ? Math.round(scale) : null,
+                extent: extent === boundsBeforeZoom ? null : extent ?? null
+            };
+        }
+        case 'zoom_to_point':
+        case 'zoom_to_extent': {
+            const bounds = store.getState().map.bbox?.bounds;
+            const outcome = zoomView(store, command);
+            boundsBeforeZoom = bounds;
+            return outcome;
+        }
+        default: throw new Error('invalidTool');
+        }
+    };
 }

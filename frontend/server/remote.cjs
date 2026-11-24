@@ -3,7 +3,7 @@ const path = require('node:path');
 const {limits} = require('../../shared/tools.json');
 const ORIGIN = 'https://geo.so.ch';
 const assistantRoutes = new Map([
-    ['/assistant-api/v1/chat', {path: '/api/v1/chat', timeout: 35000}],
+    ['/assistant-api/v1/chat', {path: '/api/v1/chat', timeout: 65000}],
     ['/assistant-api/v1/geo', {path: '/api/v1/geo', timeout: 15000}]
 ]);
 const disabled = new Set([
@@ -91,7 +91,7 @@ async function proxyAssistant(req, res, origin, fetchImpl) {
         }
         req.setTimeout(0);
         const headers = {'Content-Type': 'application/json', Accept: 'application/json'};
-        for (const name of ['x-ai-turn-id', 'x-ai-round', 'x-ai-debug']) {
+        for (const name of ['x-ai-turn-id', 'x-ai-debug']) {
             if (typeof req.headers[name] === 'string') headers[name] = req.headers[name];
         }
         const upstream = await fetchImpl(origin.replace(/\/$/, '') + route.path, {

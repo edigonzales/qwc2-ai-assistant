@@ -9,7 +9,6 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse
 
 turn_id = re.compile(r"[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}")
-round_number = re.compile(r"[1-9][0-9]?")
 
 
 def elapsed_ms(start):
@@ -49,11 +48,8 @@ async def observe_request(request, call_next):
     request.state.browser_debug = mode if debug and mode in {"meta", "content"} else None
     request.state.log_payload = debug and os.environ.get("ASSISTANT_DEBUG_PAYLOAD") == "1"
     turn = request.headers.get("x-ai-turn-id", "")
-    round_header = request.headers.get("x-ai-round", "")
     if turn_id.fullmatch(turn):
         event["turn_id"] = turn
-    if round_number.fullmatch(round_header):
-        event["round"] = int(round_header)
     status = 500
     try:
         response = await call_next(request)
