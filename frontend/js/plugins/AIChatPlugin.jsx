@@ -6,10 +6,11 @@ import InputContainer from 'qwc2/components/widgets/InputContainer';
 import Spinner from 'qwc2/components/widgets/Spinner';
 import LocaleUtils from 'qwc2/utils/LocaleUtils';
 
+import limits from '../../../shared/limits.json' with {type: 'json'};
 import {errorCode, runConversation} from './aichat/conversation.mjs';
 import {createDiagnostics} from './aichat/diagnostics.mjs';
 import {createQwcCommandExecutor, zoomToObject} from './aichat/qwc';
-import {limits, numberedLayer, readLayerDetails} from './aichat/tools.mjs';
+import {numberedLayer, readLayerDetails} from './aichat/tools.mjs';
 
 import './style/AIChat.css';
 

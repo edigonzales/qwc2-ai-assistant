@@ -1,5 +1,5 @@
+import limits from '../../../../shared/limits.json' with {type: 'json'};
 import {createDiagnostics} from './diagnostics.mjs';
-import {limits} from './tools.mjs';
 
 export function errorCode(error, fallback = 'chatFailed') {
     return /^[a-z][A-Za-z0-9]{0,59}$/.test(error?.message || '') ? error.message : fallback;

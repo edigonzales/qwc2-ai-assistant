@@ -1,7 +1,3 @@
-import definition from '../../../../shared/tools.json' with {type: 'json'};
-
-export const {limits} = definition;
-
 export function numberedLayer(results, number) {
     return Number.isInteger(number) && number > 0 ? results[number - 1] ?? null : null;
 }

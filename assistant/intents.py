@@ -1,6 +1,11 @@
 import json
 import re
 
+from schemas import (
+    CATALOG_ID, EASTING, MAX_INTENTS, MAX_LAYER_RESULTS, NORTHING, OBJECT_FILTERS, REPLY_LENGTH, SCALE, SEARCH_TEXT,
+    object_schema, valid,
+)
+
 
 GOAL_ARGUMENTS = {
     "present_layer_results": ("query", "alternative"),
@@ -83,39 +88,34 @@ add_layer für Altlasten und danach zoom_to_result für Langendorfstrasse 19b So
 Bei Bedingungen gib nur Aufträge zurück, die unabhängig ausgeführt werden dürfen."""
 
 
-def intent_declaration(intent_tool, schemas, limits):
-    query = schemas["search_layers"]["properties"]["query"]
-    arguments = {
-        **schemas["zoom_to_lv95"]["properties"],
-        **schemas["search_objects"]["properties"],
-        **schemas["resolve_location"]["properties"],
-        "alternative": query,
-        "id": schemas["get_layer_details"]["properties"]["id"],
-        "dataset_id": schemas["query_features"]["properties"]["dataset_id"],
-    }
-    item = {
-        "type": "object", "required": ["goal"], "additionalProperties": False,
-        "properties": {
-            "goal": {"type": "string", "enum": list(GOALS)},
-            "target": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": r"\S",
-                       "description": "Exact relevant words from the current request."},
-            "args": {"type": "object", "required": [], "additionalProperties": False, "properties": arguments},
-            "layer_result_number": {"type": "integer", "minimum": 1,
-                                    "maximum": schemas["present_layer_results"]["properties"]["ids"]["maxItems"]},
-            "resume": {"type": "integer", "minimum": 1, "maximum": limits["calls"]},
-        },
-    }
-    return {"type": "function", "function": {
-        "name": intent_tool,
-        "description": "Declare the GIS intents once, in the order requested. Use an empty list when no GIS intent applies.",
-        "parameters": {
-            "type": "object", "required": ["intents"], "additionalProperties": False,
-            "properties": {
-                "intents": {"type": "array", "maxItems": limits["calls"], "items": item},
-                "reply": {"type": "string", "minLength": 1, "maxLength": limits["replyLength"], "pattern": r"\S"},
-            },
-        },
-    }}
+INTENT_TARGET = {"type": "string", "minLength": 1, "maxLength": 300, "pattern": r"\S",
+                 "description": "Exact relevant words from the current request."}
+INTENT_ITEM = object_schema({
+    "goal": {"type": "string", "enum": list(GOALS)},
+    "target": INTENT_TARGET,
+    "args": object_schema({
+        "easting": EASTING,
+        "northing": NORTHING,
+        "scale": SCALE,
+        "query": SEARCH_TEXT,
+        "filters": OBJECT_FILTERS,
+        "address": SEARCH_TEXT,
+        "alternative": SEARCH_TEXT,
+        "id": CATALOG_ID,
+        "dataset_id": CATALOG_ID,
+    }, required=[]),
+    "layer_result_number": {"type": "integer", "minimum": 1, "maximum": MAX_LAYER_RESULTS},
+    "resume": {"type": "integer", "minimum": 1, "maximum": MAX_INTENTS},
+}, required=["goal"])
+INTENT_PARAMETERS = object_schema({
+    "intents": {"type": "array", "maxItems": MAX_INTENTS, "items": INTENT_ITEM},
+    "reply": {"type": "string", "minLength": 1, "maxLength": REPLY_LENGTH, "pattern": r"\S"},
+}, required=["intents"])
+DECLARE_INTENTS = {"type": "function", "function": {
+    "name": "declare_intents",
+    "description": "Declare the GIS intents once, in the order requested. Use an empty list when no GIS intent applies.",
+    "parameters": INTENT_PARAMETERS,
+}}
 
 
 def classification_messages(chat, filters):
@@ -158,8 +158,8 @@ def list_number_in_target(number, target):
     return bool(re.search(rf"\b(?:{names}|{stem}e[mnrs]?)\b", target, re.IGNORECASE))
 
 
-def read_intents(declaration, chat, parameters, schemas, valid):
-    if not valid(declaration, parameters):
+def read_intents(declaration, chat):
+    if not valid(declaration, INTENT_PARAMETERS):
         raise ValueError("invalid intent arguments")
 
     resumed = set()
@@ -190,7 +190,7 @@ def read_intents(declaration, chat, parameters, schemas, valid):
             use_whole_message = len(declaration["intents"]) == 1 and words(target) <= prior_words
             clarification = chat.message if use_whole_message else target
             target = clarification if prior_words <= words(clarification) else f"{prior.target} {clarification}"
-            if not valid(target, parameters["properties"]["intents"]["items"]["properties"]["target"]):
+            if not valid(target, INTENT_TARGET):
                 raise ValueError("resumed intent target exceeds limits")
         intent["target"] = target
 
@@ -201,7 +201,7 @@ def read_intents(declaration, chat, parameters, schemas, valid):
                 query = f"{prior.query} {clarification}"
             elif new_words and not new_words & query_words:
                 query = f"{query} {clarification}"
-            if not valid(query, schemas["search_objects"]["properties"]["query"]):
+            if not valid(query, SEARCH_TEXT):
                 raise ValueError("resumed query exceeds limits")
             args["query"] = query
 

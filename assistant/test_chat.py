@@ -10,7 +10,8 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
 
-from app import address_layer, app, limits
+from app import address_layer, app
+from schemas import MAX_INTENTS, REQUEST_BYTES
 
 
 object_filters = (
@@ -331,7 +332,7 @@ class ChatTests(unittest.TestCase):
         payload = {
             "message": "Nummer 1. Gehe zum Punkt und zeige die Karte.",
             "last_results": [{"id": "water.one", "title": "Fluss"}],
-            "pending": [{"goal": "add_layer", "target": f"Layer {i}"} for i in range(limits["calls"])],
+            "pending": [{"goal": "add_layer", "target": f"Layer {i}"} for i in range(MAX_INTENTS)],
         }
         with patch("app.get_geo", return_value={"water.one": [{"name": "water.one", "title": "Fluss"}]}):
             response = self.send(payload, model(
@@ -343,7 +344,7 @@ class ChatTests(unittest.TestCase):
         body = response.json()
         new = sum("clarification" in result for result in body["results"])
         self.assertEqual(new, 2)
-        self.assertEqual(len(body["pending"]) + new, limits["calls"])
+        self.assertEqual(len(body["pending"]) + new, MAX_INTENTS)
 
     def test_resume_address_without_prior_search_uses_the_clarified_address(self):
         address = "Langendorfstrasse 19b Solothurn"
@@ -627,7 +628,7 @@ class ChatTests(unittest.TestCase):
 
     def test_json_and_payload_limit(self):
         for body, media, status in [("{}", "text/plain", 415),
-                                    (" " * (limits["requestBytes"] + 1), "application/json", 413)]:
+                                    (" " * (REQUEST_BYTES + 1), "application/json", 413)]:
             response = self.api.post("/api/v1/chat", content=body, headers={"Content-Type": media})
             self.assertEqual(response.status_code, status)
 
