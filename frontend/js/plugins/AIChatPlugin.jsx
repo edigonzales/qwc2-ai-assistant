@@ -156,7 +156,7 @@ export default function AIChatPlugin() {
                 }
             });
             controller.signal.throwIfAborted();
-            let layerRows;
+            let presented;
             let objectRows;
             let issue;
             let confirmations = 0;
@@ -166,7 +166,7 @@ export default function AIChatPlugin() {
             for (const {intent, data, command, outcome, clarification, error: resultError} of response.results) {
                 if (data?.type === 'layer_results') {
                     const pendingAdd = clarification?.pending?.goal === 'add_layer' ? {turn: turnKey, intent} : undefined;
-                    layerRows = [...(layerRows || []), ...data.layers.map(layer => ({...layer, pendingAdd}))];
+                    presented = [...(presented || []), ...data.layers.map(layer => ({...layer, pendingAdd}))];
                 } else if (data?.type === 'object_results') {
                     objectRows = [...(objectRows || []), ...data.candidates.map(row => ({...row, intent}))];
                 } else if (data && !command) {
@@ -184,7 +184,6 @@ export default function AIChatPlugin() {
             }
             pendingIntents.current = {theme: turnTheme, items: nextPending};
             if (response.reply) answers.push(response.reply);
-            const presented = layerRows && [...new Map(layerRows.map(row => [row.id, row])).values()].slice(0, 10);
             if (presented && !answers.some(Boolean)) {
                 answers.push(presented.length ? LocaleUtils.tr('aichat.found', presented.length) : LocaleUtils.tr('aichat.noResults'));
             }

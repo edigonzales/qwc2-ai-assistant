@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+from itertools import zip_longest
 from pathlib import Path
 from time import perf_counter
 from typing import Literal, NotRequired, TypedDict
@@ -728,6 +729,25 @@ async def run_intent(request, payload, index, intent, deadline):
     return result
 
 
+def limit_layer_results(results):
+    lists = [result["data"] for result in results if result.get("data", {}).get("type") == "layer_results"]
+    if len(lists) < 2:
+        return
+    ranked = [data["layers"] for data in lists]
+    for data in lists:
+        data["layers"] = []
+    seen = set()
+    limit = schemas["present_layer_results"]["properties"]["ids"]["maxItems"]
+    # Take one result from each search before using more of a broad topic's list.
+    for row in zip_longest(*ranked):
+        for data, layer in zip(lists, row):
+            if layer and layer["id"] not in seen:
+                data["layers"].append(layer)
+                seen.add(layer["id"])
+                if len(seen) == limit:
+                    return
+
+
 @app.post("/api/v1/chat")
 async def chat(request: Request):
     body = await request_body(request)
@@ -762,6 +782,7 @@ async def chat(request: Request):
             results.append({"intent": index, "error": "chatTimeout"})
         else:
             results.append(await run_intent(request, payload, index, intent, deadline))
+    limit_layer_results(results)
     response = {"results": results}
     if reply := declaration.get("reply"):
         response["reply"] = reply
@@ -769,6 +790,7 @@ async def chat(request: Request):
         response["reply"] = "Was möchtest du auf der Karte tun?"
     resumed = {intent["resume"] for intent in intents if "resume" in intent}
     if resumed:
+        available = limits["calls"] - sum("clarification" in result for result in results)
         response["pending"] = [item.model_dump(exclude_none=True) for index, item in enumerate(payload.pending, 1)
-                               if index not in resumed]
+                               if index not in resumed][:available]
     return {**response, **browser_debug(request)}

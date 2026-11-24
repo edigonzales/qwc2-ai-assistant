@@ -180,7 +180,7 @@ def read_intents(declaration, chat, parameters, schemas, valid):
         prior_words = words(prior.target) if prior else set()
         if not words(target) <= message_words | prior_words:
             raise ValueError("unsupported intent target")
-        if number and not prior and not list_number_in_target(number, target):
+        if number and not list_number_in_target(number, chat.message if prior else target):
             raise ValueError("unspecified layer result number")
         if prior:
             clarification = chat.message if words(target) <= prior_words else target

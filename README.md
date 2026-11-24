@@ -42,7 +42,7 @@ gewohnten Dienste.
    für diese Adresse lautet:
 
    ```json
-   {"type":"zoom_to_point","coordinates":[2605899,1229278],"crs":"EPSG:2056","target_scale":1000}
+   {"type":"zoom_to_point","coordinates":[2605899,1229278],"crs":"EPSG:2056","target_scale":1000,"label":"Langendorfstrasse 19b, 4500 Solothurn (Adresse)"}
    ```
 
 4. Der Browser prüft, ob das ursprüngliche Kartenthema weiterhin aktiv und
@@ -129,7 +129,7 @@ Objektsuchen und vier Modellaufrufe möglich. Die Objektsuche liefert bis zu
 ## Einstiegspunkte im Code
 
 - Die Chat-Seitenleiste rendert Nachrichten, Treffer und Direktaktionen. [AIChatPlugin.jsx](frontend/js/plugins/AIChatPlugin.jsx)
-- FastAPI prüft Argumente anhand der Tool-Schemas. Der Proxy übernimmt aus derselben Datei die maximale Grösse der Anfrage. [tools.json](shared/tools.json)
+- FastAPI prüft Argumente anhand der Tool-Schemas. Der Proxy und das Chat-Formular lesen aus derselben Datei ihre Grössenlimits. [tools.json](shared/tools.json)
 - Host- und Containerbetrieb nutzen dieselben Proxy-Routen für Live-Karte, Geo-Werkzeuge und Chat. [remote.cjs](frontend/server/remote.cjs)
 - Die Absichtserkennung enthält den Systemprompt, den Userprompt mit Kontext und das Schema für die Modellantwort. [intents.py](assistant/intents.py)
 - FastAPI führt die kantonalen Abfragen aus und erstellt die Kartenbefehle. [app.py](assistant/app.py)

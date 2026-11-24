@@ -251,6 +251,17 @@ class ChatTests(unittest.TestCase):
         self.assertNotIn("command", result)
         self.assertEqual(geo.call_args.args[1], {"filter": "water.two"})
 
+    def test_layer_clarification_cannot_resume_an_unstated_list_number(self):
+        payload = {
+            "message": "Ja",
+            "last_results": [{"id": "water.one", "title": "Fluss"}, {"id": "water.two", "title": "See"}],
+            "pending": [{"goal": "add_layer", "target": "Wasser"}],
+        }
+        with patch("app.get_geo") as geo:
+            response = self.send(payload, model(intent("add_layer", "Ja", layer_result_number=2, resume=1)))
+        self.assertEqual((response.status_code, response.json()), (502, {"detail": "invalidModelResponse"}))
+        geo.assert_not_called()
+
     def test_independent_layer_succeeds_and_ambiguous_parcel_can_resume(self):
         parcel = object_filters[3]
         extent = [2607600, 1228517, 2607700, 1228518]
@@ -500,6 +511,25 @@ class ChatTests(unittest.TestCase):
                 self.assertEqual(result["data"]["type"], "layer_results")
                 self.assertEqual([row["id"] for row in result["data"]["layers"]], ids)
         self.assertEqual(len(self.requests), 4)
+
+    def test_layer_results_keep_both_topics_within_the_shared_list_limit(self):
+        topics = ("Wasser", "Grundwasser")
+        ids = {topic: ["shared", *(f"{topic.lower()}.{i}" for i in range(9))] for topic in topics}
+
+        async def geo(path, params, *errors):
+            return {"results": [layer_hit(id, id) for id in ids[params["searchtext"].removeprefix("Karte: ")]]}
+
+        declaration = model(*(intent("present_layer_results", topic, args={"query": topic}) for topic in topics))
+        rankings = [httpx.Response(200, json=completion(calls=[call("select_layers", {"ids": ids[topic]})]))
+                    for topic in topics]
+        with patch("app.get_geo", side_effect=geo):
+            response = self.send({"message": "Suche Karten zu Wasser und Grundwasser."}, declaration, *rankings)
+        self.assertEqual(response.status_code, 200)
+        lists = [[layer["id"] for layer in result["data"]["layers"]] for result in response.json()["results"]]
+        self.assertTrue(all(lists))
+        self.assertEqual(len(lists[0]) + len(lists[1]), 10)
+        self.assertEqual(len(set(lists[0] + lists[1])), 10)
+        self.assertEqual(lists[1][0], "grundwasser.0")
 
     def test_server_limits_searches_per_turn(self):
         names = ("Hübeli", "Passwang", "Belchen", "Chilchberg")
