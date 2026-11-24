@@ -6,63 +6,52 @@ Suchdienste von geo.so.ch. QWC2 stammt aus dem
 und verwendet dessen unveränderte Version `qwc2-lts@2026.0.30`. Die BSD-Lizenz
 steht in [frontend/LICENSE](frontend/LICENSE).
 
-FastAPI vermittelt den Chat an die OpenAI-kompatible Infomaniak-API und
-fragt die Solothurner Suche, `weblayers` und den Data Service ab. Der
-Browser ruft die Geo-Werkzeuge über `/assistant-api/v1/geo` auf. QWC2
-führt Kartenaktionen aus und lädt Legenden und Objektinformationen über
-seine gewohnten Dienste. Der Chatverlauf lebt im Browser und wird beim
-Neuladen verworfen.
-
 ## Architektur
 
-```mermaid
-flowchart TB
-    browser["Browser<br/>QWC2, Chat und Tool-Schleife"]
-    proxy["Same-Origin-Proxy<br/>QWC2-Webserver"]
-    assistant["FastAPI<br/>Chat und Geo-Werkzeuge"]
-    model["Infomaniak<br/>LLM-API"]
-    geo["geo.so.ch<br/>Solothurner Geodienste"]
+Der QWC2-Webserver leitet `POST /assistant-api/v1/chat` an
+`POST /api/v1/chat` in FastAPI weiter. Er ist der Same-Origin-Proxy.
+FastAPI erkennt den Auftrag mit dem Infomaniak-Modell und fragt die
+Solothurner Suche, `weblayers` oder den Data Service direkt ab. Der
+Browser verarbeitet die Antwort in der gelieferten Reihenfolge und führt
+Kartenbefehle über QWC2 aus. Der Chatverlauf lebt im Browser bis zum Neuladen.
 
-    browser -->|Chat und Geo-Werkzeuge| proxy
-    browser -->|Karte, Layerdefinitionen und Objektinfo| proxy
-    proxy -->|POST /api/v1/chat und /api/v1/geo| assistant
-    proxy -->|Lesende Kartendienste| geo
-    assistant -->|Chat Completions| model
-    assistant -->|Suche, weblayers und Data Service| geo
-```
+Beim Klick auf **Details** oder **Anzeigen** für einen Kartentreffer liest
+der Browser die Layer-Metadaten über `/assistant-api/v1/geo`. QWC2 lädt
+Kartenbilder, Layerdefinitionen, Legenden und Objektinformationen über seine
+gewohnten Dienste.
 
-### Ablauf einer Wassersuche
+### Beispiel «Gehe nach Solothurn zur Langendorfstrasse 19b»
 
-```mermaid
-sequenceDiagram
-    actor Nutzer
-    participant Browser as Browser / QWC2
-    participant Proxy as Same-Origin-Proxy
-    participant API as FastAPI
-    participant LLM as Infomaniak
-    participant Geo as Solothurner Suche
+1. Der Browser sendet den Text und die aktuelle Thema-ID einmal an
+   `/assistant-api/v1/chat`. Der QWC2-Webserver reicht die Anfrage an
+   FastAPI weiter.
+2. FastAPI sendet dem Modell den Systemprompt mit allen unterstützten
+   Absichten und Beispielen. Im Userprompt steht der eingegebene Text.
+   Wenn Kontext vorhanden ist, steht er separat bezeichnet daneben.
+   Das Modell soll die gewünschte Absicht und den Suchtext liefern.
+   Eine mögliche Modellantwort für `declare_intents` lautet:
 
-    Nutzer->>Browser: Suche Karten zu Wasser und Grundwasser
-    loop Modellrunden bis zur Trefferliste
-        Browser->>Proxy: POST /assistant-api/v1/chat<br/>Verlauf und bisherige Tool-Ergebnisse
-        Proxy->>API: POST /api/v1/chat
-        API->>LLM: Nachrichten, Tools und tool_choice
-        LLM-->>API: Tool-Aufrufe
-        API-->>Proxy: Validierte Modellantwort
-        Proxy-->>Browser: Validierte Modellantwort
-        alt search_layers
-            Browser->>Proxy: POST /assistant-api/v1/geo
-            Proxy->>API: POST /api/v1/geo
-            API->>Geo: Thematische Kartensuche
-            Geo-->>API: Kandidaten
-            API-->>Proxy: Kompakte Treffer
-            Proxy-->>Browser: Kompakte Treffer
-        else present_layer_results
-            Browser->>Browser: IDs prüfen
-            Browser-->>Nutzer: Nummerierte Trefferliste und Trefferzahl anzeigen
-        end
-    end
-```
+   ```json
+   {"intents":[{"goal":"zoom_to_result","target":"Solothurn zur Langendorfstrasse 19b","args":{"query":"Langendorfstrasse 19b Solothurn"}}]}
+   ```
+
+3. FastAPI prüft die Modellargumente und sucht die Adresse bei `geo.so.ch`.
+   Ein vollständiger, eindeutiger, exakter Treffer liefert die Koordinaten.
+   FastAPI erstellt daraus den Kartenbefehl und gibt ihn mit den Treffern
+   als Antwort auf den ursprünglichen Chat-Aufruf zurück. Der Kartenbefehl
+   für diese Adresse lautet:
+
+   ```json
+   {"type":"zoom_to_point","coordinates":[2605899,1229278],"crs":"EPSG:2056","target_scale":1000,"label":"Langendorfstrasse 19b, 4500 Solothurn (Adresse)"}
+   ```
+
+4. Der Browser prüft, ob das ursprüngliche Kartenthema weiterhin aktiv und
+   die Karte bereit ist. QWC2 zentriert die Karte. Der Chat zeigt den
+   tatsächlich erreichten Kartenstand.
+
+Bei mehreren unabhängigen Aufträgen erhält der Browser ein Ergebnis je
+Auftrag. Ein eindeutiger Auftrag kann bereits ausgeführt werden, während bei
+einem mehrdeutigen Auftrag eine Trefferauswahl oder Rückfrage erscheint.
 
 ## Lokal starten
 
@@ -108,34 +97,43 @@ Beispiele für Anfragen:
 
 - «Wo ist meine Karte zentriert und welche thematischen Layer sind sichtbar?»
 - «Suche Karten zu Wasser und Grundwasser im Kanton Solothurn.»
+- «Suche Hübeli.»
+- «Gehe zu Klosterplatz 1 in Solothurn.»
+- «Gehe zum Grundstück 123 in Bellach.»
+- «Lade den Layer mit den Altlasten und gehe zu Grundstück 2084 in Solothurn.»
 - «In welchem Gewässerschutzbereich liegt Klosterplatz 1 in Solothurn?»
 - «Mehr Informationen zu Nummer 2.»
 - «Zeige Nummer 2 auf der Karte.»
 - «Entferne den Layer Gemeindegrenzen.»
 - «Zentriere die Karte auf LV95 2607100 Ost und 1228400 Nord im Massstab 1:10000.»
 
-**Details** liest Metadaten zu einem Treffer. **Anzeigen** schaltet den
-Treffer direkt auf der Karte ein. Die Nummern beziehen sich auf die zuletzt
-angezeigte Liste. QWC2 wählt beim Zentrieren eine unterstützte Zoomstufe.
-Für Kartenänderungen gibt der Server pro Nachricht das zu einem klar
-erkannten Auftrag passende Kartenwerkzeug frei. Die Beispielsätze zeigen
-die unterstützten Formen.
+**Details** liest die Metadaten eines Kartentreffers. **Anzeigen** schaltet
+einen Layer ein oder zoomt auf einen Objekttreffer. Nummern im Chat beziehen
+sich auf die letzte Layerliste. Die Objektsuche verwendet die Volltextfilter
+des aktuellen Kartenthemas ohne `foreground`. Nach einem Navigationsbefehl
+zoomt QWC2 bei vollständig ausgewertetem, eindeutigem Treffer auf ca. 1:1000
+für Adressen oder auf den ganzen Suchausschnitt für Grundstücke. Bei mehreren
+Treffern oder einer gekürzten Liste kannst du einen Eintrag direkt auswählen
+oder den Befehl mit Ort, Objektart oder Grundbuchkreis präzisieren.
+Die Antwort auf eine Rückfrage setzt den offenen Auftrag mit einer frischen
+Suche fort. Kartenstand und sichtbare Layer liest QWC2 zum Zeitpunkt, an dem
+es den entsprechenden Lesebefehl ausführt.
 
-Pro Nachricht sind vier Modellrunden und acht Tool-Aufrufe möglich.
-Davon sind höchstens drei kantonale Kartenabfragen mit je bis zu 20 Kandidaten
-zulässig. Das Modell sortiert bis zu 40 eindeutige Kandidaten und kann bis zu
-zehn davon anzeigen. Der Browser prüft die IDs gegen die aktuellen Treffer.
-Bei einer reinen Kartensuche endet der Zug mit der erfolgreichen Präsentation
-der Liste. Eine Suchwiederholung bei leeren Treffern kann eine zusätzliche
-Modellrunde erfordern.
-[Suchmessung mit zehn Fachfragen](docs/search-quality.md)
+Eine eindeutige Adressnavigation benötigt einen Modellaufruf. Bei mehreren
+Kartentreffern kann FastAPI das Modell zusätzlich um deren Reihung bitten.
+Pro Nachricht sind höchstens acht deklarierte Aufträge, drei Karten- oder
+Objektsuchen und vier Modellaufrufe möglich. Die Objektsuche liefert bis zu
+25 und die Kartentrefferliste bis zu zehn Einträge.
+[Frühere Suchmessung mit zehn Fachfragen](docs/search-quality.md)
 
 ## Einstiegspunkte im Code
 
 - Die Chat-Seitenleiste rendert Nachrichten, Treffer und Direktaktionen. [AIChatPlugin.jsx](frontend/js/plugins/AIChatPlugin.jsx)
-- Browser und FastAPI lesen die Tool-Schemas und Grenzen aus derselben Datei. [tools.json](shared/tools.json)
+- FastAPI prüft die Argumente für Geo-Aufrufe und Modellantworten anhand seiner Schemas. [schemas.py](assistant/schemas.py)
+- Browser und FastAPI verwenden dieselben Grenzen für Text und Verlauf. Proxy und FastAPI teilen das Limit für die Anfragegrösse. [limits.json](shared/limits.json)
 - Host- und Containerbetrieb nutzen dieselben Proxy-Routen für Live-Karte, Geo-Werkzeuge und Chat. [remote.cjs](frontend/server/remote.cjs)
-- FastAPI validiert Toolargumente, liest die kantonalen Dienste und vermittelt Modellaufrufe an Infomaniak. [app.py](assistant/app.py)
+- Die Absichtserkennung enthält den Systemprompt, den Userprompt mit Kontext und das Schema für die Modellantwort. [intents.py](assistant/intents.py)
+- FastAPI führt die kantonalen Abfragen aus und erstellt die Kartenbefehle. [app.py](assistant/app.py)
 
 ## Prüfen
 
@@ -152,23 +150,27 @@ docker compose exec -T assistant env -u INFOMANIAK_API_TOKEN -u INFOMANIAK_PRODU
 
 1. Öffne die Karte mit konfiguriertem Infomaniak-Zugang und wähle
    **Karte & Werkzeuge → KI-Assistent**.
-2. Sende «Suche Karten zu Wasser und Grundwasser im Kanton Solothurn.»
+2. Sende «Gehe nach Solothurn zur Langendorfstrasse 19b». Die Karte wird
+   auf `[2605899, 1229278]` in EPSG:2056 zentriert. Im Netzwerk-Tab
+   erscheint ein Chat-Aufruf.
+3. Sende «Suche Karten zu Wasser und Grundwasser im Kanton Solothurn.»
    Der Chat zeigt eine nummerierte Liste mit bis zu zehn Kartentreffern.
-3. Klicke bei einem noch nicht sichtbaren Treffer auf **Details**. Unter
+4. Klicke bei einem noch nicht sichtbaren Treffer auf **Details**. Unter
    dem Treffer erscheint die Layer-ID. Klicke dort auf **Anzeigen**.
    Unter **Kartenebenen und Legende** erscheint der Layer als aktiv.
    Bei Gruppen können dort die aktiven Unterlayer erscheinen.
-4. Öffne den KI-Assistenten erneut und sende «Entferne Nummer 2», wobei
+5. Öffne den KI-Assistenten erneut und sende «Entferne Nummer 2», wobei
    du die Nummer des angezeigten Treffers verwendest. Der Chat bestätigt
    die Entfernung und der Layer verschwindet aus Karte und Ebenenbaum.
-5. Frage «In welchem Gewässerschutzbereich liegt Klosterplatz 1 in Solothurn?».
+6. Frage «In welchem Gewässerschutzbereich liegt Klosterplatz 1 in Solothurn?».
    Die Antwort nennt den am aufgelösten Punkt abgefragten Bereich `Au`.
 
 ## Debugging
 
-Im Netzwerk-Tab siehst du die Aufrufe des Browsers an `/assistant-api/v1/chat`
-und `/assistant-api/v1/geo`. Der Modellaufruf an Infomaniak läuft in FastAPI.
-Für diesen Aufruf kann FastAPI der Chatantwort ein Diagnosefeld hinzufügen.
+Im Netzwerk-Tab siehst du pro Nachricht einen Aufruf an
+`/assistant-api/v1/chat`. Direkte Klicks auf Kartentreffer können
+`/assistant-api/v1/geo` verwenden. Modell- und Geo-Aufrufe innerhalb
+eines Chat-Zugs laufen in FastAPI.
 
 Setze `ASSISTANT_DEBUG=1` in der lokalen `.env` und übernimm die Einstellung
 mit `docker compose up -d assistant`. Aktiviere dann im gewünschten Tab die
@@ -179,20 +181,18 @@ sessionStorage.setItem('qwc-ai-debug', 'content')
 ```
 
 Aktiviere in der Konsole die Debug- oder Verbose-Ausgabe und filtere nach
-`[QWC KI]`. `chat.request` und `geo.request` zeigen die Browseraufrufe,
-`chat.backend` den Modellaufruf und `tool.result` sowie `chat.display` die
-Ausführung und Anzeige.
-Bei `content` enthält `chat.backend` die gesendeten Modellnachrichten und die
-sichtbare Modellantwort als Vorschau unter `payload.json`. Bei
-`payload.truncated: true` enthält das Feld nur den Anfang des JSON-Texts.
-Für Metadaten verwende `meta`.
-Mit `sessionStorage.removeItem('qwc-ai-debug')` schaltest du die Ausgabe aus.
+`[QWC KI]`. Bei `content` zeigt `chat.backend` die Modellnachrichten und
+das letzte Modellergebnis als Vorschau unter `payload.json`.
+`payload.truncated: true` markiert eine gekürzte Vorschau. Für Metadaten
+verwende `meta`. Mit `sessionStorage.removeItem('qwc-ai-debug')` schaltest
+du die Ausgabe aus.
 
 FastAPI schreibt pro Chat- und Geo-Aufruf eine JSON-Zeile auf `stdout`.
-Mit `ASSISTANT_DEBUG=1` enthält sie zusätzlich Provider- oder Geo-Diagnosen.
-`turn_id` und `round` verbinden den Eintrag mit der Browserkonsole. Direkte
-Trefferaktionen erhalten eine eigene `turn_id`. Scheitert der Aufruf schon
-im Browser oder Proxy, gibt es dazu keinen FastAPI-Eintrag.
+Bei Chat-Aufrufen zählen `model_calls` und `geo_calls` die Modellaufrufe
+und Geo-Werkzeuge eines Zugs. Interne HTTP-Zugriffe eines Geo-Werkzeugs
+sind in `geo_calls` nicht einzeln gezählt. Die `turn_id` verbindet die
+Zeile mit der Browserkonsole. Bei aktiviertem Debug enthält die Zeile
+zusätzliche Angaben zum letzten Modellaufruf oder zum direkten Geo-Aufruf.
 
 ```sh
 docker compose logs --no-log-prefix --no-color -f assistant

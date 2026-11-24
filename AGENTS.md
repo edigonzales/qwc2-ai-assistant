@@ -14,9 +14,10 @@ Layer-Suche über bestehende Solothurner Dienste. Keine eigene GIS-Fachlogik.
 - Öffentliche Karten-/Konfigurationsdienste von `https://geo.so.ch` wie im
   Referenzprojekt verwenden. Remote-Proxy nur für freigegebene Leseoperationen;
   Cookies und Authorization nicht an Solothurner Dienste weiterreichen.
-- FastAPI vermittelt das Modell von Infomaniak und führt fachliche Leseaufrufe
-  an den Solothurner Such- und Data Service aus. Der Browser ruft diese Tools
-  über einen festen Same-Origin-Endpunkt auf. Kartenaktionen führt QWC2 aus.
+- FastAPI koordiniert den Chat mit dem Modell von Infomaniak und den
+  Solothurner Geodiensten. Der Browser übermittelt jede Nachricht einmal
+  über den festen Same-Origin-Endpunkt und führt die Kartenbefehle über
+  QWC2 aus. Direkte Klicks auf Kartentreffer können Geo-Metadaten lesen.
 - Die kantonale Suche liefert Karten- und Ortstreffer, `weblayers` liefert die
   darstellbaren QWC2-Layer. Gruppen zeigen ihre Unterlayer, Fassaden bleiben
   eine Kartenebene. Fachabfragen verwenden konkrete, vom Data Service

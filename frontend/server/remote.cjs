@@ -1,9 +1,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const {limits} = require('../../shared/tools.json');
+const {requestBytes} = require('../../shared/limits.json');
 const ORIGIN = 'https://geo.so.ch';
 const assistantRoutes = new Map([
-    ['/assistant-api/v1/chat', {path: '/api/v1/chat', timeout: 35000}],
+    ['/assistant-api/v1/chat', {path: '/api/v1/chat', timeout: 65000}],
     ['/assistant-api/v1/geo', {path: '/api/v1/geo', timeout: 15000}]
 ]);
 const disabled = new Set([
@@ -73,7 +73,7 @@ async function proxyAssistant(req, res, origin, fetchImpl) {
     if (req.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
         return error(415, 'jsonRequired');
     }
-    if (Number(req.headers['content-length']) > limits.requestBytes) return error(413, 'requestTooLarge');
+    if (Number(req.headers['content-length']) > requestBytes) return error(413, 'requestTooLarge');
 
     const chunks = [];
     let length = 0;
@@ -83,7 +83,7 @@ async function proxyAssistant(req, res, origin, fetchImpl) {
         req.setTimeout(5000, () => req.destroy());
         for await (const chunk of req.iterator({destroyOnReturn: false})) {
             length += chunk.length;
-            if (length > limits.requestBytes) {
+            if (length > requestBytes) {
                 res.setHeader('Connection', 'close');
                 return error(413, 'requestTooLarge');
             }
@@ -91,7 +91,7 @@ async function proxyAssistant(req, res, origin, fetchImpl) {
         }
         req.setTimeout(0);
         const headers = {'Content-Type': 'application/json', Accept: 'application/json'};
-        for (const name of ['x-ai-turn-id', 'x-ai-round', 'x-ai-debug']) {
+        for (const name of ['x-ai-turn-id', 'x-ai-debug']) {
             if (typeof req.headers[name] === 'string') headers[name] = req.headers[name];
         }
         const upstream = await fetchImpl(origin.replace(/\/$/, '') + route.path, {

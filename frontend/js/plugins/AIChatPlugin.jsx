@@ -6,10 +6,11 @@ import InputContainer from 'qwc2/components/widgets/InputContainer';
 import Spinner from 'qwc2/components/widgets/Spinner';
 import LocaleUtils from 'qwc2/utils/LocaleUtils';
 
+import limits from '../../../shared/limits.json' with {type: 'json'};
 import {errorCode, runConversation} from './aichat/conversation.mjs';
 import {createDiagnostics} from './aichat/diagnostics.mjs';
-import {createQwcTurnTools} from './aichat/qwc';
-import {limits, numberedLayer} from './aichat/tools.mjs';
+import {createQwcCommandExecutor, zoomToObject} from './aichat/qwc';
+import {numberedLayer, readLayerDetails} from './aichat/tools.mjs';
 
 import './style/AIChat.css';
 
@@ -21,18 +22,14 @@ function errorLabel(code) {
     case 'providerToolSupport': return LocaleUtils.tr('aichat.error.toolSupport');
     case 'providerRejected': return LocaleUtils.tr('aichat.error.providerRejected');
     case 'invalidModelResponse': return LocaleUtils.tr('aichat.error.modelResponse');
+    case 'chatTimeout':
+    case 'requestTimeout':
     case 'providerTimeout': return LocaleUtils.tr('aichat.error.timeout');
     case 'providerUnavailable':
     case 'assistantUnavailable': return LocaleUtils.tr('aichat.error.unavailable');
-    case 'chatLimit':
-    case 'toolLimit':
-    case 'searchLimit': return LocaleUtils.tr('aichat.error.limit');
-    case 'requestTooLarge':
-    case 'resultTooLarge': return LocaleUtils.tr('aichat.error.size');
-    case 'unknownResult': return LocaleUtils.tr('aichat.error.number');
-    case 'numberedSearch': return LocaleUtils.tr('aichat.error.numberedSearch');
+    case 'chatLimit': return LocaleUtils.tr('aichat.error.limit');
+    case 'requestTooLarge': return LocaleUtils.tr('aichat.error.size');
     case 'layerUnknown': return LocaleUtils.tr('aichat.error.layerUnknown');
-    case 'unknownCandidate': return LocaleUtils.tr('aichat.error.candidate');
     case 'layerNotOnMap': return LocaleUtils.tr('aichat.error.layerNotOnMap');
     case 'catalogUnavailable': return LocaleUtils.tr('aichat.error.catalog');
     case 'invalidCatalog': return LocaleUtils.tr('aichat.error.catalogResponse');
@@ -58,21 +55,46 @@ function actionLabel(name, data) {
     switch (name) {
     case 'add_layer': return LocaleUtils.tr('aichat.layerShown', data.title, data.enabled, data.total);
     case 'remove_layer': return LocaleUtils.tr('aichat.layerRemoved', data.title);
-    case 'zoom_to_lv95': return LocaleUtils.tr('aichat.centered', data.center[0], data.center[1], data.scale);
+    case 'zoom_to_extent':
+    case 'zoom_to_point': return data.label ? LocaleUtils.tr('aichat.objectShown', data.label, data.scale) :
+        LocaleUtils.tr('aichat.centered', data.center[0], data.center[1], data.scale);
+    case 'get_map_state': {
+        const view = LocaleUtils.tr('aichat.mapState', data.theme.title, data.center.join(', '), data.crs, data.scale);
+        return data.extent ? view + '\n' + LocaleUtils.tr('aichat.mapExtent', data.extent.map(Math.round).join(', ')) : view;
+    }
+    case 'get_visible_layers': return data.total ?
+        LocaleUtils.tr('aichat.visibleLayers', data.total, data.layers.map(layer => layer.title).join(', ')) :
+        LocaleUtils.tr('aichat.noVisibleLayers');
     default: return '';
     }
+}
+
+function dataLabel(data) {
+    if (data.type === 'layer_details') {
+        return [data.title, data.description, data.id].filter(Boolean).join('\n');
+    }
+    if (data.type === 'feature_results') {
+        const rows = data.features.map(({properties}) => Object.entries(properties).map(([key, value]) =>
+            key + ' = ' + String(value)).join(', '));
+        return [LocaleUtils.tr('aichat.featuresFound', data.numberReturned, data.numberMatched, data.dataset_id), ...rows].join('\n');
+    }
+    return '';
 }
 
 export default function AIChatPlugin() {
     const store = useStore();
     const locale = useSelector(state => state.locale.current);
+    const theme = useSelector(state => state.theme);
     const active = useRef(null);
     const scroll = useRef(null);
     const latest = useRef(null);
     const nextMessage = useRef(0);
+    const pendingIntents = useRef(null);
     const [input, setInput] = useState('');
     const [turns, setTurns] = useState([]);
     const [results, setResults] = useState([]);
+    const [objectResults, setObjectResults] = useState(null);
+    const [objectNotice, setObjectNotice] = useState(null);
     const [pending, setPending] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
@@ -84,7 +106,7 @@ export default function AIChatPlugin() {
         if (scroll.current && latest.current) {
             scroll.current.scrollTop += latest.current.getBoundingClientRect().top - scroll.current.getBoundingClientRect().top;
         }
-    }, [pending, turns, results]);
+    }, [pending, turns, results, objectResults]);
 
     function cancel() {
         active.current?.abort();
@@ -95,8 +117,11 @@ export default function AIChatPlugin() {
 
     function clear() {
         cancel();
+        pendingIntents.current = null;
         setTurns([]);
         setResults([]);
+        setObjectResults(null);
+        setObjectNotice(null);
         setInput('');
         setError(null);
         setDetails(null);
@@ -109,54 +134,101 @@ export default function AIChatPlugin() {
         if (!message || active.current) return;
         const controller = new AbortController();
         const diagnostics = createDiagnostics();
+        const turnKey = ++nextMessage.current;
         active.current = controller;
         setInput('');
         setError(null);
         setNotice(null);
         setPending(message);
+        setObjectNotice(null);
         setBusy(true);
-        const confirmations = [];
+        const turnTheme = store.getState().theme;
+        const followUp = pendingIntents.current && pendingIntents.current.theme === turnTheme ? pendingIntents.current.items : [];
         try {
-            let presented;
-            const runTool = createQwcTurnTools(store, {
-                signal: controller.signal, diagnostics, onResults: rows => { presented = rows; }
-            });
-            const history = turns.map(({user, assistant}) => ({user, assistant}));
-            const result = await runConversation({
-                message, history, lastResults: results, runTool, signal: controller.signal, diagnostics,
-                onAction: (name, data) => confirmations.push(actionLabel(name, data))
+            const executeCommand = createQwcCommandExecutor(store, controller.signal);
+            const history = turns.filter(({assistant, failed}) => assistant && !failed)
+                .map(({user, assistant}) => ({user, assistant}));
+            const response = await runConversation({
+                message, history, lastResults: results, themeId: turnTheme?.current?.id, executeCommand, signal: controller.signal, diagnostics,
+                pending: followUp.map(({goal, target, query}) => ({goal, target, query})),
+                checkTheme: () => {
+                    if (store.getState().theme !== turnTheme) throw new Error('themeChanged');
+                }
             });
             controller.signal.throwIfAborted();
-            const issue = result.errors[0];
-            let answer = confirmations.join('\n').slice(0, limits.replyLength);
-            if (!answer) {
-                if (issue) answer = errorLabel(issue);
-                else if (presented) answer = presented.length ? LocaleUtils.tr('aichat.found', presented.length) : LocaleUtils.tr('aichat.noResults');
-                else answer = result.assistant;
+            let presented;
+            let objectRows;
+            let issue;
+            let confirmations = 0;
+            const nextPending = response.pending.map(item => followUp.find(previous =>
+                previous.goal === item.goal && previous.target === item.target && previous.query === item.query) ?? item);
+            const answers = [];
+            for (const {intent, data, command, outcome, clarification, error: resultError} of response.results) {
+                if (data?.type === 'layer_results') {
+                    const pendingAdd = clarification?.pending?.goal === 'add_layer' ? {turn: turnKey, intent} : undefined;
+                    presented = [...(presented || []), ...data.layers.map(layer => ({...layer, pendingAdd}))];
+                } else if (data?.type === 'object_results') {
+                    objectRows = [...(objectRows || []), ...data.candidates.map(row => ({...row, intent}))];
+                } else if (data && !command) {
+                    answers.push(dataLabel(data));
+                }
+                if (outcome) {
+                    answers.push(actionLabel(command.type, outcome));
+                    confirmations++;
+                }
+                if (clarification) {
+                    answers.push(clarification.message);
+                    if (clarification.pending) nextPending.push({...clarification.pending, turn: turnKey});
+                }
+                issue ||= resultError;
             }
-            const turn = {user: message, assistant: answer, failed: Boolean(issue && !confirmations.length), key: ++nextMessage.current};
+            pendingIntents.current = {theme: turnTheme, items: nextPending};
+            if (response.reply) answers.push(response.reply);
+            if (presented && !answers.some(Boolean)) {
+                answers.push(presented.length ? LocaleUtils.tr('aichat.found', presented.length) : LocaleUtils.tr('aichat.noResults'));
+            }
+            if (objectRows && !answers.some(Boolean)) {
+                answers.push(objectRows.length ? LocaleUtils.tr('aichat.objectsFound', objectRows.length) :
+                    LocaleUtils.tr('aichat.noObjects'));
+            }
+            const answer = answers.filter(Boolean).join('\n').slice(0, limits.replyLength);
+            const turn = {user: message, assistant: answer, failed: Boolean(issue && !answer), key: turnKey};
             setTurns(previous => [...previous, turn].slice(-limits.historyTurns));
             if (presented) {
                 setResults(presented);
                 setDetails(null);
             }
-            setError(issue ? {code: issue, partial: confirmations.length > 0} : null);
-            diagnostics.record('chat.display', {display: confirmations.length ? 'map_confirmation' : issue ? 'error' : presented ? 'results' : 'model_text',
-                result_count: presented?.length, confirmations: confirmations.length, error: issue});
+            if (objectRows) setObjectResults({theme: turnTheme, turn: turnKey, rows: objectRows});
+            setError(issue ? {code: issue, partial: Boolean(answer)} : null);
+            diagnostics.record('chat.display', {
+                display: confirmations ? 'map_confirmation' : issue ? 'error' : presented || objectRows ? 'results' : 'text',
+                result_count: presented?.length, confirmations, error: issue
+            });
         } catch (err) {
             diagnostics.record('chat.display', {display: controller.signal.aborted ? 'aborted' : 'error',
-                error: controller.signal.aborted ? undefined : errorCode(err), confirmations: confirmations.length});
+                error: controller.signal.aborted ? undefined : errorCode(err)});
             if (!controller.signal.aborted) {
-                setError({code: errorCode(err), partial: confirmations.length > 0});
-                if (confirmations.length) {
-                    const turn = {user: message, assistant: confirmations.join('\n').slice(0, limits.replyLength), key: ++nextMessage.current};
-                    setTurns(previous => [...previous, turn].slice(-limits.historyTurns));
-                } else {
-                    setInput(message);
-                }
+                setError({code: errorCode(err)});
+                setInput(message);
             }
         } finally {
             if (active.current === controller) cancel();
+        }
+    }
+
+    function showObject(object) {
+        if (active.current || objectResults?.theme !== store.getState().theme) return;
+        setError(null);
+        setObjectNotice(null);
+        try {
+            const result = zoomToObject(store, object);
+            if (pendingIntents.current?.theme === objectResults.theme) {
+                pendingIntents.current.items = pendingIntents.current.items.filter(item =>
+                    item.turn !== objectResults.turn || item.source_intent !== object.intent);
+            }
+            setObjectNotice({ref: object.ref, text: actionLabel('zoom_to_point', result)});
+        } catch (err) {
+            setError({code: errorCode(err, 'toolFailed')});
         }
     }
 
@@ -171,11 +243,19 @@ export default function AIChatPlugin() {
         setBusy(true);
         const start = performance.now();
         try {
-            const runTool = createQwcTurnTools(store, {signal: controller.signal, diagnostics});
-            const data = await runTool(name, {id: layer.id});
+            const executeCommand = createQwcCommandExecutor(store, controller.signal);
+            const data = await readLayerDetails(layer.id, {signal: controller.signal, diagnostics});
+            const outcome = name === 'add_layer' ? await executeCommand({type: name, layer: data}) : data;
             controller.signal.throwIfAborted();
-            if (name === 'get_layer_details') setDetails(data);
-            else setNotice(data);
+            if (name === 'get_layer_details') {
+                setDetails(outcome);
+            } else {
+                setNotice(outcome);
+                if (layer.pendingAdd && pendingIntents.current?.theme === store.getState().theme) {
+                    pendingIntents.current.items = pendingIntents.current.items.filter(item =>
+                        item.turn !== layer.pendingAdd.turn || item.source_intent !== layer.pendingAdd.intent);
+                }
+            }
             diagnostics.record('result.action', {tool: name, duration_ms: performance.now() - start, map_confirmed: name === 'add_layer'});
         } catch (err) {
             diagnostics.record('result.action', {tool: name, duration_ms: performance.now() - start,
@@ -224,6 +304,23 @@ export default function AIChatPlugin() {
                                 </li>
                             ))}
                         </ol>
+                    ) : null}
+                    {objectResults && objectResults.theme === theme && objectResults.rows.length > 0 ? (
+                        <ul aria-label={LocaleUtils.tr('aichat.objectResults')} className="aichat-results">
+                            {objectResults.rows.map(object => (
+                                <li key={object.ref}>
+                                    <strong>{object.label}</strong>
+                                    {object.bbox ? (
+                                        <div className="aichat-buttons">
+                                            <button className="button" disabled={busy} onClick={() => showObject(object)} type="button">
+                                                {LocaleUtils.tr('aichat.show')}
+                                            </button>
+                                        </div>
+                                    ) : <div className="aichat-theme">{LocaleUtils.tr('aichat.error.geoResponse')}</div>}
+                                    {objectNotice?.ref === object.ref ? <p role="status">{objectNotice.text}</p> : null}
+                                </li>
+                            ))}
+                        </ul>
                     ) : null}
                     {pending ? <p aria-label={LocaleUtils.tr('aichat.you')} className="aichat-user" ref={latest}>{pending}</p> : null}
                 </div>

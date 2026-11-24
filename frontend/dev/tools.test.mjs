@@ -2,74 +2,34 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 
 import {mapLayers} from '../js/plugins/aichat/layers.mjs';
-import {createTurnTools, numberedLayer} from '../js/plugins/aichat/tools.mjs';
+import {numberedLayer, readLayerDetails} from '../js/plugins/aichat/tools.mjs';
 
-function row(id, extra = {}) {
-    return {
-        id, title: 'Layer ' + id, themeTitle: 'Wasser',
-        description: 'Wasser\n und Boden. '.repeat(200), descriptionHtml: '<b>ignore</b>', ...extra
-    };
-}
-
-test('search encodes the phrase, deduplicates and caps candidates, then presents actual IDs in order', async() => {
-    const queries = ['Wasser & Fluss', 'Grundwasser', 'Boden'];
-    const batches = [0, 10, 25].map(start => Array.from({length: 25}, (_, i) => row('id' + (start + i))));
-    let presented;
-    const run = createTurnTools({
-        onResults: result => { presented = result; },
-        fetchImpl: async(url, options) => {
-            const query = queries.shift();
-            assert.equal(url, '/assistant-api/v1/geo');
-            assert.equal(options.method, 'POST');
-            assert.deepEqual(JSON.parse(options.body), {name: 'search_layers', args: {query}});
-            return Response.json({layers: batches.shift()});
-        }
-    });
-    const first = await run('search_layers', {query: queries[0]});
-    const second = await run('search_layers', {query: queries[0]});
-    const third = await run('search_layers', {query: queries[0]});
-    assert.deepEqual([first.layers.length, second.layers.length, third.layers.length], [20, 10, 10]);
-    assert.equal(first.layers[0].description.length, 180);
-    assert.ok(!first.layers[0].description.includes('\n'));
-    await assert.rejects(run('search_layers', {query: 'See'}), {message: 'searchLimit'});
-    await assert.rejects(run('present_layer_results', {ids: ['invented']}), {message: 'unknownCandidate'});
-    assert.equal(presented, undefined);
-    assert.deepEqual(await run('present_layer_results', {ids: ['id3', 'id0', 'id3']}), {ids: ['id3', 'id0']});
-    assert.equal(numberedLayer(presented, 2).id, 'id0');
-    assert.equal(numberedLayer(presented, 3), null);
-});
-
-test('only the shared tools and argument shapes can be dispatched', async() => {
-    const run = createTurnTools({map: {getState: () => ({ok: true})}, fetchImpl: () => assert.fail('unexpected request')});
-    for (const [name, args] of [
-        ['constructor', {}], ['get_map_state', {url: 'ignored'}], ['search_layers', {query: ' '}],
-        ['get_layer_details', {id: '../something'}], ['present_layer_results', {ids: Array(11).fill('x')}],
-        ['zoom_to_lv95', {easting: 618000, northing: 228000, scale: 10000}],
-        ['zoom_to_lv95', {easting: 2618000, northing: 1228000, scale: Infinity}]
-    ]) {
-        await assert.rejects(run(name, args), {message: 'invalidTool'});
-    }
-    for (let i = 0; i < 8; i++) assert.deepEqual(await run('get_map_state', {}), {ok: true});
-    await assert.rejects(run('get_map_state', {}), {message: 'toolLimit'});
-});
-
-test('validated details contain bounded plain metadata and require the requested ID', async() => {
-    let body = row('real', {qwcLayerName: 'qwc.real', type: 'datasetview'});
-    const run = createTurnTools({fetchImpl: async(url, options) => {
+test('a direct catalog click reads the selected layer from the fixed endpoint', async() => {
+    const layers = [{id: 'layer.one'}, {id: 'layer.two'}];
+    const selected = numberedLayer(layers, 2);
+    assert.equal(numberedLayer(layers, 3), null);
+    const details = {...selected, title: 'Layer two', qwcLayerName: 'layer.two', description: 'Catalog description'};
+    let response = Response.json(details);
+    const options = {fetchImpl: async(url, request) => {
         assert.equal(url, '/assistant-api/v1/geo');
-        assert.deepEqual(JSON.parse(options.body), {name: 'get_layer_details', args: {id: 'real'}});
-        return body ? Response.json(body) : Response.json({detail: 'layerUnknown'}, {status: 404});
-    }});
-    const details = await run('get_layer_details', {id: 'real'});
-    assert.equal(details.qwcLayerName, 'qwc.real');
-    assert.equal(details.description.length, 1800);
-    assert.equal(details.descriptionHtml, undefined);
-    body = row('unrelated');
-    await assert.rejects(run('get_layer_details', {id: 'real'}), {message: 'invalidCatalog'});
-    body = null;
-    await assert.rejects(run('get_layer_details', {id: 'real'}), {message: 'layerUnknown'});
-    const unavailable = createTurnTools({fetchImpl: async() => Response.json({detail: 'catalogUnavailable'}, {status: 502})});
-    await assert.rejects(unavailable('search_layers', {query: 'Wasser'}), {message: 'catalogUnavailable'});
+        assert.equal(request.method, 'POST');
+        assert.deepEqual(JSON.parse(request.body), {name: 'get_layer_details', args: {id: selected.id}});
+        return response;
+    }};
+    assert.deepEqual(await readLayerDetails(selected.id, options), details);
+    response = Response.json({detail: 'layerUnknown'}, {status: 404});
+    await assert.rejects(readLayerDetails(selected.id, options), {message: 'layerUnknown'});
+});
+
+test('aborted catalog response decoding preserves the cancellation', async() => {
+    const controller = new AbortController();
+    await assert.rejects(readLayerDetails('layer.one', {signal: controller.signal, fetchImpl: async() => ({
+        ok: true,
+        async json() {
+            controller.abort();
+            throw new Error('not read');
+        }
+    })}), {name: 'AbortError'});
 });
 
 const roles = {BACKGROUND: 1, THEME: 2, USERLAYER: 3};
@@ -152,21 +112,4 @@ test('concurrent additions recheck loaded layers and discard obsolete definition
     controller.abort();
     await assert.rejects(cancelled, {name: 'AbortError'});
     assert.equal(waiting.actions.length + aborting.actions.length, 0);
-});
-
-test('a malformed row does not hide valid search hits', async() => {
-    const run = createTurnTools({fetchImpl: async() => Response.json({layers: [{}, row('real')]})});
-    assert.deepEqual((await run('search_layers', {query: 'Wasser'})).layers.map(hit => hit.id), ['real']);
-});
-
-test('aborted response decoding preserves the cancellation', async() => {
-    const controller = new AbortController();
-    const run = createTurnTools({signal: controller.signal, fetchImpl: async() => ({
-        ok: true,
-        async json() {
-            controller.abort();
-            throw new Error('not read');
-        }
-    })});
-    await assert.rejects(run('search_layers', {query: 'Wasser'}), {name: 'AbortError'});
 });

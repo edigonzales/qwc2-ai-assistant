@@ -116,3 +116,185 @@ Eingabeentwurf blieben sichtbar. Der Proxy lieferte `mapClickAction: 'identify'`
 in beiden Gerätekonfigurationen. Der Klick wurde auf dem Desktop geprüft.
 
 Lokal bestanden 41 Node-Tests und `git diff --check`.
+
+## Generische Objektsuche und Navigation
+
+Basis `f3d8e9972a5de131d1ab8dfd978901c2583f3b46`. OpenCode 2.0.28
+mit `deepseek/deepseek-flash` meldete für `0e5ef06` und `5f0f3b9`
+**FAIL**. Die Korrektur vereinheitlicht die Eingabenormalisierung, hält
+Layer- und Punktabfragen an die bisherigen Nachweise gebunden und lässt
+Treffer nach einem späteren Chatfehler sichtbar. Die Nachprüfung
+`3884c29cdc59cc333dc8f48c839422a758146f7e` ergab **PASS**. Sie führte
+42 Node- und 33 Python-Tests aus. Die gezielte Nachprüfung des finalen
+Produktcommits `5e4bd0861cfd3a539243493b577b9956966e3112` ergab **PASS**.
+Sie prüfte den Abgleich von Namen mit vorangestellter Objektart, den kalten
+Konfigurationscache und die 33 Python-Tests. Beide Nachprüfungen liefen offline.
+
+Lokal bestanden
+42 Node- und 33 Python-Tests, gezieltes ESLint, Compose-Build und
+Compose-Konfigurationsprüfung sowie `git diff --check`.
+
+Chromium prüfte mit Infomaniak (`Qwen/Qwen3.8-27B-FP8`) und der
+kantonalen Volltextsuche im Standardthema alle acht Objektfilter. Der Klosterplatz 1
+wurde auf LV95 2607600 / 1228517 bei 1:945 zentriert. Die Karte umfasste
+die BBOX von Grundstück 123 in Bellach. Für Nummer 123 in Messen erschien
+eine Rückfrage. Sowohl der Klick auf Brunnenthal als auch der präzisierte
+Navigationsbefehl zeigten den passenden Ausschnitt. Die breite Hübeli-Suche
+liess die Karte stehen. Die gezielte Flurnamen- und Strassensuche führte
+zum jeweiligen Objekt. Weitere Zoom-Prüfungen betrafen Olten, den
+Geländenamen Passwang, das projektierte Grundstück 379 in Kappel und das
+Gebäude mit EGID 333333. Im eBau-Thema wurde der Adresszoom wiederholt.
+
+Die bestehende Wassersuche, das Anzeigen und Entfernen der Grundwassergruppe,
+die direkte LV95-Zentrierung und die Fachantwort `Au` am Klosterplatz
+wurden im Browser ebenfalls geprüft. Bei einem simulierten Modellfehler nach
+der erfolgreichen Live-Suche blieben die Messen-Treffer auswählbar.
+Automatischer Zoom setzt einen eindeutigen, vollständig ausgewerteten Treffer
+voraus. Bei gekürzten
+Suchantworten sind Eingrenzung und die direkte Auswahl eines sichtbaren
+Treffers möglich. Freie Befehlsvarianten können ausserhalb der erkannten
+ausdrücklichen Navigationsformen liegen.
+
+## Modellgesteuerte GIS-Aufträge
+
+Basis `baf2799124db95384c976eb27b71a148fbde710e`. In einem Chat-Zug kann
+das Modell mehrere GIS-Aufträge deklarieren. Suchnachweise werden dem
+jeweiligen Auftrag zugeordnet. Eine Rückfrage setzt den offenen Auftrag
+mit neuer Suche fort.
+
+Das Erstreview von `b1011e2e6074715d7ad2e1e9299f1e37bec0d91d` mit
+OpenCode 2.0.28 und `deepseek/deepseek-flash` ergab **FAIL**. Eine
+Rückfrage vor dem ersten Suchaufruf ging nach einer erfolgreichen zweiten
+Aktion verloren. Die Korrektur erhält den offenen Auftrag, übernimmt
+zugelassene Angaben aus der Präzisierung in die Suche und bindet die
+Layer-Entfernung an die Katalog-ID.
+Die Nachprüfung von `5a34137b5db456b996e4a318512ae6b91fae5b19` mit
+demselben Modell ergab **PASS**. Sie bestätigte offene Kartenaufträge ohne
+vorherige Suche, den Katalognachweis und die präzisierte Objektsuche.
+Die gezielte Prüfung von `dac72a5f68aa0e790333e7dd0568da2d95719e71`
+ergab **FAIL**, weil ein unversuchter nummerierter Auftrag beim Fortsetzen
+seine Bindung an die Liste verlieren konnte. Die Prüfung des finalen
+Produktcommits `7be0c9dcdd88f0a6fe61833f4a1d175314598868` ergab **PASS**.
+Sie bestätigte den Fehlerfall am Vorgänger und führte 23 Python-Tests aus.
+Die unabhängigen Reviews liefen ohne Live-Dienste.
+
+Lokal bestanden 43 Node- und 23 Python-Tests, gezieltes ESLint,
+Compose-Build und Compose-Konfigurationsprüfung sowie `git diff --check`.
+Chromium lud mit der konfigurierten Inferenz-API und der kantonalen Suche
+im selben Zug den Kataster der belasteten Standorte und zeigte die ganze
+BBOX von Grundstück 2084 in Solothurn. Die freie Bitte um Navigation zum
+Klosterplatz 1 führte zum bestätigten Adresspunkt bei 1:945.
+
+Im kontrollierten Browser-Fall ersetzten zwei simulierte Grundstückstreffer
+die erste Objektantwort für 2084. Der Altlasten-Layer wurde geladen, die
+Karte blieb bis zur Präzisierung stehen und «Altstadt» löste nur eine neue
+Grundstückssuche und den Zoom aus. Das Modell und die Altlasten-Suche liefen
+dabei live. Im Browser wurden auch die Wassersuche, Layer anzeigen und
+wieder entfernen, die Fachantwort `Au` sowie eine verneinte Suche und eine
+hypothetische Zoomfrage ohne Kartenänderung geprüft. Ein früherer Live-Lauf
+hatte beim Formulieren einer Rückfrage einen Timeout der Inferenz-API.
+
+## README-Diagramme
+
+Die unabhängige Nachprüfung von `45800190fcb22912dbb74aeb5b5ab4cfffab6021`
+mit OpenCode 2.0.28 und `deepseek/deepseek-flash` ergab **PASS**. Sie
+bestätigte die Registrierung der Aufträge in der ersten Runde, den separaten
+POST je Suchaufruf und die Anzeige der Kartenbestätigungen nach der
+Tool-Schleife. Beide Mermaid-Diagramme wurden in draw.io gerendert und
+visuell geprüft. `git diff --check` war erfolgreich. Die Darstellung im
+GitHub-Renderer und neue Live-Tests lagen ausserhalb des Dokumentationsreviews.
+
+## Chat-Orchestrierung in FastAPI
+
+Basis `8b35a19fd05ca63d4c0d7bc9d7003a27746ed65a`.
+
+Unabhängige Reviews mit OpenCode 2.0.28 und `deepseek/deepseek-flash`.
+Der Erstreview von `207ee6773e89b47528d7fdaaa005a7f18d0e7235` ergab
+**FAIL**. Die Nachprüfungen
+`2ab20491f66f2e7e2773c9d2e05a0ac5c886c783` und
+`5eff16c7943d0f7783663c63e858075731152892` bestätigten die begrenzte
+Trefferliste und die korrigierte Adresssuche. Die Korrekturen erhalten
+offene Aufträge bei vorübergehenden Fehlern, binden Treffernummern an
+ihren Auftrag und begrenzen die Zahl offener Rückfragen auf acht.
+Eine Suche mit einem Alternativbegriff liefert nur Treffer, die das
+Modell dem ursprünglichen Thema zuordnet.
+Die technische Nachprüfung von `01f42082fe4ff65822111bf267d88886c40a8eae`
+ergab **PASS** mit 31 Python- und 34 Node-Tests. Die abschliessende
+Prompt-Nachprüfung von `03ab2abb9c090400de4a5ed391833bb70571dc37` ergab
+ebenfalls **PASS**.
+
+Lokal bestanden 31 Python-Tests, 34 Node-Tests, gezieltes ESLint und der
+Produktionsbuild. Webpack meldete Grössenwarnungen für das QWC2-Bundle.
+Im Live-Test mit Chrome, Infomaniak und geo.so.ch hatte jede der folgenden
+Nachrichten genau einen Browser-POST an `/assistant-api/v1/chat`.
+Die Zeiten stammen aus zwei Durchläufen vom Absenden bis zur UI-Prüfung.
+
+| Auftrag | Modellaufrufe | Geo-Werkzeuge | Browser | Ergebnis |
+|---|---:|---:|---:|---|
+| Langendorfstrasse 19b, Solothurn | 1 | 1 | 5,4–5,9 s | EPSG:2056 `[2605899, 1229278]`, QWC2-Massstab 1:945 |
+| Grundstück 2084 suchen und Karte stehen lassen | 1 | 1 | 3,6–4,2 s | Ein auswählbarer Treffer, Mittelpunkt unverändert |
+| Altlasten laden und zu Grundstück 2084 zoomen | 1 | 3 | 3,9–14,5 s | KBS aktiv, Zoom auf `[2607721, 1228805, 2607775, 1228863]` |
+| Grundstück 123 in Messen | 1 | 1 | 2,6–3,6 s | Vier auswählbare Treffer und Rückfrage |
+| Rückfrage mit «Brunnenthal» beantworten | 1 | 1 | 1,5–3,3 s | Erneute Suche und Zoom auf die bestätigte Grundstücksausdehnung |
+| Gewässerschutzbereich am Klosterplatz 1 | 2 | 3 | 2,7–7,0 s | Data Service liefert `typ = Au` |
+| Karten zu Wasser und Grundwasser suchen | 3 | 2 | 12,0–32,7 s | Im abschliessenden Durchlauf fünf Layer je Thema |
+
+Ein separater Chrome-Test prüfte mit simulierten Chatantworten und echter
+QWC2-Karte die Befehlsreihenfolge, Kartenabfragen nach einer Aktion, Zoom
+ohne Massstab, Abbruch und Themenwechsel bei verspäteter Antwort.
+Die direkten Aktionen **Details** und **Anzeigen** für Gemeindegrenzen
+funktionierten mit je einem Geo-Aufruf.
+Die Auftragsfolge «Gehe bitte zur Adresse» und danach
+«Langendorfstrasse 19b in Solothurn» ergab zuerst eine Rückfrage mit null
+Geo-Werkzeugen, dann den bestätigten Punkt mit einem Modellaufruf und
+einem Geo-Werkzeug. In einem früheren Kontrolllauf lief der Modellaufruf
+in die Provider-Zeitgrenze.
+Der Kartenmassstab von 1:945 ergibt sich aus den verfügbaren Zoomstufen
+für die angeforderten 1:1000. Geo-Werkzeuge werden pro Chat-Zug gezählt.
+Der separate Zugriff auf die Themenkonfiguration beim Start des
+Suchcaches ist darin nicht enthalten.
+Die vollständige frühere Messreihe mit zehn Fachfragen wurde nicht wiederholt.
+
+## Gemeinsame Limits und FastAPI-Schemas
+
+Basis `928b799ae9eecc18e2ccde1bbd8edf87a6bd868e`, geprüft
+`9a4d015b428ca8d27d6ff197d9b9e702ff5fc6c9`. **PASS** mit OpenCode 2.0.28
+und `deepseek/deepseek-flash` im separaten Worktree. Der Review führte
+31 Python- und 34 Node-Tests aus. Der lokale Vergleich mit der Basis
+ergab identische JSON-Schemas für die fünf Geo-Aufrufe, beide
+Modellwerkzeuge und beide API-Anfragemodelle.
+
+Beide Docker-Images wurden gebaut und lokal gestartet. Proxy und FastAPI
+gaben bei 131’073 Bytes HTTP 413 zurück. Bei 131’072 Bytes erreichte die
+Anfrage jeweils die Inhaltsprüfung. Chrome bestätigte den Zoom zur
+Langendorfstrasse 19b auf `[2605899, 1229278]` in EPSG:2056 mit einem
+Chat-POST und einem Modellaufruf. **Details** zum Kataster der belasteten
+Standorte lieferte die Layer-ID `ch.so.afu.altlasten.standorte` über einen
+direkten Geo-Aufruf. Beim Ranking der Gemeindegrenzen antwortete Infomaniak
+zweimal mit HTTP 503. Webpack meldete die Grössenwarnungen für das QWC2-Bundle.
+
+## Abnahme für main
+
+Basis `f3d8e9972a5de131d1ab8dfd978901c2583f3b46`, FastAPI-Stand
+`a8bc76ac8171b8e7aae54a176e5144a3da1dfc82`. **PASS** im unabhängigen
+OpenCode-Review mit Version 2.0.28 und `deepseek/deepseek-flash`. Der
+Reviewer führte 31 Python- und 34 Node-Tests aus. Die strikte Prüfung
+der Zielwörter kann eine vom Modell umformulierte Absicht mit
+`502 invalidModelResponse` zurückweisen.
+
+Die lokalen 31 Python- und
+34 Node-Tests bestanden. Beide Docker-Images wurden gebaut und gestartet.
+Bei 131’073 Bytes lieferten Proxy und FastAPI HTTP 413. Bei 131’072 Bytes
+erreichte die Anfrage jeweils die Argumentprüfung.
+
+- Die Langendorfstrasse 19b wurde mit einem Chat-POST und einem Modellaufruf
+  in 8,8 Sekunden bei `[2605899, 1229278]` in EPSG:2056 zentriert.
+- Der kombinierte Auftrag aktivierte das Altlasten-Kataster und zoomte
+  auf die Ausdehnung von Grundstück 2084 in Solothurn. Ein Chat-POST,
+  ein Modellaufruf und drei Geo-Werkzeuge dauerten zusammen 20,1 Sekunden
+  bis zur UI-Prüfung.
+- **Details** zum Altlasten-Kataster lieferte die verifizierte Layer-ID
+  `ch.so.afu.altlasten.standorte` mit einem direkten Geo-Aufruf.
+- Das Live-Ranking zu Gemeindegrenzen lieferte in diesem Lauf drei
+  Katalogtreffer mit zwei Modellaufrufen. Der zuvor dokumentierte
+  Provider-Fehler HTTP 503 trat in diesem Lauf nicht auf.

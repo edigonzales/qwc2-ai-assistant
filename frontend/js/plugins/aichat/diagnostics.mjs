@@ -8,10 +8,9 @@ export function createDiagnostics() {
     }
     const enabled = mode === 'meta' || mode === 'content';
     return {
-        headers(round) {
+        headers() {
             return {
                 'X-AI-Turn-Id': turnId,
-                ...(round ? {'X-AI-Round': String(round)} : {}),
                 ...(enabled ? {'X-AI-Debug': mode} : {})
             };
         },

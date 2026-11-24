@@ -2,177 +2,105 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 
 import {runConversation} from '../js/plugins/aichat/conversation.mjs';
-import {createTurnTools, limits} from '../js/plugins/aichat/tools.mjs';
 
-const call = (id, name, args = {}) => ({
-    id, type: 'function', function: {name, arguments: JSON.stringify(args)}
-});
-const reply = (content, ...toolCalls) => Response.json({assistant: {role: 'assistant', content, tool_calls: toolCalls}});
-const previous = [{id: 'layer.one', title: 'Eins'}, {id: 'layer.two', title: 'Zwei'}];
+const options = {message: 'Gehe nach Solothurn zur Langendorfstrasse 19b', history: [],
+    lastResults: [], themeId: 'default'};
+const point = {type: 'zoom_to_point', coordinates: [2605899, 1229278], crs: 'EPSG:2056',
+    target_scale: 1000, label: 'Langendorfstrasse 19b, Solothurn'};
 
-test('numbered follow-up correlates the exact result and rejects the wrong past ID', async() => {
-    const steps = [
-        reply(null, call('call_1', 'add_layer', {id: 'layer.one'}), call('call_2', 'get_layer_details', {id: 'layer.two'}),
-            call('call_3', 'search_layers', {query: 'Zwei'})),
-        reply('Zwei')
-    ];
-    const result = await runConversation({
-        message: 'Mehr Informationen zu Ebene 2', history: [], lastResults: previous,
-        runTool: (name, args) => {
-            assert.equal(name, 'get_layer_details');
-            assert.equal(args.id, 'layer.two');
-            return {title: 'Zwei'};
+test('one chat request carries context and the browser executes verified coordinates locally', async() => {
+    const outcome = {center: point.coordinates, scale: 1000};
+    const previous = {id: 'layer.one', title: 'Eins', description: 'A longer catalog description'};
+    const history = [{user: 'Suche Wasser', assistant: 'Matching layers (1)'}];
+    const pending = [{goal: 'zoom_to_result', target: 'Langendorfstrasse 19b', query: 'Langendorfstrasse 19b in Solothurn'}];
+    const calls = [];
+    const response = await runConversation({
+        ...options, history, lastResults: [previous], pending,
+        fetchImpl: async(url, request) => {
+            calls.push(url);
+            assert.equal(request.method, 'POST');
+            assert.equal(request.redirect, 'error');
+            assert.equal(request.headers['X-AI-Round'], undefined);
+            assert.deepEqual(JSON.parse(request.body), {
+                message: options.message, history, pending, theme_id: 'default',
+                last_results: [{id: previous.id, title: previous.title}]
+            });
+            return Response.json({results: [{intent: 1, command: point}]});
         },
-        fetchImpl: (url, options) => {
-            assert.equal(url, '/assistant-api/v1/chat');
-            const payload = JSON.parse(options.body);
-            assert.deepEqual(payload.last_results, previous);
-            if (steps.length === 1) {
-                assert.deepEqual(payload.rounds[0].results, [
-                    {tool_call_id: 'call_1', content: '{"ok":false,"error":"unknownCandidate"}'},
-                    {tool_call_id: 'call_2', content: '{"ok":true,"data":{"title":"Zwei"}}'},
-                    {tool_call_id: 'call_3', content: '{"ok":false,"error":"numberedSearch"}'}
-                ]);
+        executeCommand(command) {
+            assert.deepEqual(command, point);
+            return outcome;
+        }
+    });
+    assert.deepEqual(calls, ['/assistant-api/v1/chat']);
+    assert.deepEqual(response.results, [{intent: 1, command: point, outcome}]);
+});
+
+test('local reads wait for preceding commands and a failed command preserves other results', async() => {
+    const add = {type: 'add_layer', layer: {id: 'layer.one', title: 'Eins', qwcLayerName: 'layer.one'}};
+    const read = {type: 'get_visible_layers'};
+    const data = {type: 'object_results', candidates: []};
+    const clarification = {message: 'Welchen Ort meinst du?', pending: {goal: 'zoom_to_result', target: 'Olten', source_intent: 3}};
+    const error = {intent: 4, error: 'datasetUnavailable'};
+    let finishAdding;
+    const visibleLayers = [];
+    const commands = [];
+    const waiting = runConversation({
+        ...options,
+        fetchImpl: async() => Response.json({
+            results: [{intent: 1, command: add}, {intent: 2, command: read},
+                {intent: 3, data, clarification, command: point, outcome: {fake: true}}, error],
+            pending: [{goal: 'zoom_to_result', target: 'Alte Adresse'}]
+        }),
+        async executeCommand(command) {
+            commands.push(command.type);
+            if (command.type === 'add_layer') {
+                await new Promise(resolve => { finishAdding = resolve; });
+                visibleLayers.push(command.layer);
+            } else if (command.type === 'get_visible_layers') {
+                return {layers: visibleLayers, total: visibleLayers.length};
+            } else {
+                throw new Error('mapNotReady');
             }
-            return steps.shift();
+            return {title: command.layer.title, enabled: 1, total: 1};
         }
     });
-    assert.deepEqual(result, {assistant: 'Zwei', errors: ['unknownCandidate', 'numberedSearch']});
-    await assert.rejects(runConversation({message: 'Zeig Nummer 3', history: [], lastResults: previous}), {message: 'unknownResult'});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(commands, ['add_layer']);
+    finishAdding();
+    const response = await waiting;
+    assert.deepEqual(commands, ['add_layer', 'get_visible_layers', 'zoom_to_point']);
+    assert.equal(response.results[0].outcome.title, 'Eins');
+    assert.deepEqual(response.results[1].outcome, {layers: [add.layer], total: 1});
+    assert.deepEqual(response.results[2], {intent: 3, data, clarification, command: point, outcome: null, error: 'mapNotReady'});
+    assert.deepEqual(response.results[3], {...error, outcome: null});
+    assert.deepEqual(response.pending, [{goal: 'zoom_to_result', target: 'Alte Adresse'}]);
 });
 
-test('a parcel number reaches the chat with an existing layer result list', async() => {
-    const message = 'Gehe zum Grundstück Nr. 101 in Solothurn';
-    const result = await runConversation({
-        message, history: [], lastResults: previous,
-        fetchImpl: (_url, options) => {
-            assert.equal(JSON.parse(options.body).message, message);
-            return reply('Welche Adresse gehört zum Grundstück?');
-        }
-    });
-    assert.equal(result.assistant, 'Welche Adresse gehört zum Grundstück?');
-});
-
-test('a searched ID may be used in the same response batch after its search', async() => {
-    const executed = [];
-    const steps = [
-        reply(null, call('a', 'search_layers', {query: 'Wasser'}), call('b', 'add_layer', {id: 'known'})),
-        reply('Layer angezeigt.')
-    ];
-    await runConversation({
-        message: 'Zeig den Wasserlayer', history: [], lastResults: [],
-        fetchImpl: () => steps.shift(),
-        runTool: (name, args) => {
-            executed.push([name, args]);
-            return name === 'search_layers' ? {layers: [{id: 'known'}]} : {id: 'known'};
-        }
-    });
-    assert.deepEqual(executed, [['search_layers', {query: 'Wasser'}], ['add_layer', {id: 'known'}]]);
-});
-
-test('only a successful search-only presentation ends the turn without another request', async() => {
-    const layer = {id: 'ch.so.wasser', title: 'Wasser'};
-    for (const [searchOnly, id, requests] of [[true, layer.id, 2], [false, layer.id, 3], [true, 'invented', 3]]) {
-        const steps = [
-            reply(null, call('search', 'search_layers', {query: 'Wasser'})),
-            reply(null, call('list', 'present_layer_results', {ids: [id], search_only: searchOnly})),
-            reply('Weitere Antwort')
-        ];
-        let presented;
-        const result = await runConversation({
-            message: 'Suche Karten zu Wasser', history: [], lastResults: [],
-            fetchImpl: () => steps.shift(),
-            runTool: createTurnTools({
-                fetchImpl: () => Response.json({layers: [layer]}),
-                onResults: rows => { presented = rows; }
-            })
-        });
-        assert.equal(steps.length, 3 - requests);
-        assert.deepEqual(presented?.map(row => row.id), id === layer.id ? [id] : undefined);
-        assert.deepEqual(result.errors, id === layer.id ? [] : ['unknownCandidate']);
-    }
-});
-
-test('a visible QWC name cannot substitute for a catalog ID', async() => {
-    const steps = [
-        reply(null, call('v', 'get_visible_layers'), call('r', 'remove_layer', {id: 'qwc.alias'})),
-        reply(null, call('s', 'search_layers', {query: 'QWC-Titel'})),
-        reply(null, call('c', 'remove_layer', {id: 'catalog.id'})),
-        reply('Layer entfernt.')
-    ];
-    const executed = [];
-    const confirmations = [];
-    const turn = await runConversation({
-        message: 'Entferne den sichtbaren Layer', history: [], lastResults: [],
-        onAction: (name, data) => confirmations.push([name, data]),
-        fetchImpl: (_url, options) => {
-            if (steps.length === 3) {
-                assert.deepEqual(JSON.parse(options.body).rounds[0].results[1], {
-                    tool_call_id: 'r', content: '{"ok":false,"error":"unknownCandidate"}'
-                });
-            }
-            return steps.shift();
+test('a changed theme prevents late command execution', async() => {
+    const theme = {id: 'default'};
+    let currentTheme = theme;
+    await assert.rejects(runConversation({
+        ...options,
+        fetchImpl: async() => {
+            currentTheme = {...theme};
+            return Response.json({results: [{intent: 1, command: point}]});
         },
-        runTool: (name, args) => {
-            if (name === 'get_visible_layers') return {layers: [{qwcLayerName: 'qwc.alias', title: 'QWC-Titel'}]};
-            if (name === 'search_layers') return {layers: [{id: 'catalog.id', title: 'QWC-Titel'}]};
-            executed.push(args.id);
-            return {removed: true};
-        }
-    });
-    assert.deepEqual(executed, ['catalog.id']);
-    assert.deepEqual(confirmations, [['remove_layer', {removed: true}]]);
-    assert.deepEqual(turn.errors, ['unknownCandidate']);
-});
-
-test('a layer details 404 remains visible alongside a verified removal in the same batch', async() => {
-    const steps = [
-        reply(null, call('a', 'remove_layer', {id: 'catalog.missing'}), call('b', 'remove_layer', {id: 'catalog.known'})),
-        reply('Beide Layer entfernt.')
-    ];
-    const confirmations = [];
-    const runTool = createTurnTools({
-        map: {removeLayer: row => ({id: row.id, title: row.title, removed: true})},
-        fetchImpl: (_url, options) => JSON.parse(options.body).args.id === 'catalog.missing' ?
-            Response.json({detail: 'layerUnknown'}, {status: 404}) :
-            Response.json({id: 'catalog.known', qwcLayerName: 'known', title: 'Bekannter Layer'})
-    });
-    const turn = await runConversation({
-        message: 'Entferne die Layer catalog.missing und catalog.known.', history: [], lastResults: [],
-        fetchImpl: () => steps.shift(), runTool, onAction: (name, data) => confirmations.push([name, data])
-    });
-    assert.deepEqual(confirmations, [['remove_layer', {id: 'catalog.known', title: 'Bekannter Layer', removed: true}]]);
-    assert.deepEqual(turn.errors, ['layerUnknown']);
-});
-
-test('the browser stops before executing a fourth-round or excess batch', async() => {
-    let requests = 0;
-    let executed = 0;
-    await assert.rejects(runConversation({
-        message: 'Kartenstatus', history: [], lastResults: [],
-        fetchImpl: () => reply(null, call('c' + ++requests, 'get_map_state')),
-        runTool: () => { ++executed; return {}; }
-    }), {message: 'chatLimit'});
-    assert.equal(requests, limits.rounds);
-    assert.equal(executed, limits.rounds - 1);
-
-    const calls = Array.from({length: limits.calls + 1}, (_, i) => call('c' + i, 'get_map_state'));
-    await assert.rejects(runConversation({
-        message: 'Kartenstatus', history: [], lastResults: [],
-        fetchImpl: () => reply(null, ...calls),
-        runTool: () => assert.fail('oversized batch ran')
-    }), {message: 'chatLimit'});
+        checkTheme() {
+            if (currentTheme !== theme) throw new Error('themeChanged');
+        },
+        executeCommand: () => assert.fail('no execution on a changed theme')
+    }), {message: 'themeChanged'});
 });
 
 test('cancelling with a response in flight prevents late QWC execution', async() => {
     const controller = new AbortController();
-    let respond;
-    const chat = runConversation({
-        message: 'Zeig Nummer 1', history: [], lastResults: previous, signal: controller.signal,
-        fetchImpl: () => new Promise(resolve => { respond = resolve; }),
-        runTool: () => assert.fail('old tool ran')
-    });
-    controller.abort();
-    respond(reply(null, call('c', 'add_layer', {id: 'layer.one'})));
-    await assert.rejects(chat, {name: 'AbortError'});
+    await assert.rejects(runConversation({
+        ...options, signal: controller.signal,
+        fetchImpl: async() => {
+            controller.abort();
+            return Response.json({results: [{intent: 1, command: point}]});
+        },
+        executeCommand: () => assert.fail('no execution after cancellation')
+    }), {name: 'AbortError'});
 });
