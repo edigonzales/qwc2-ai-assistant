@@ -298,3 +298,67 @@ erreichte die Anfrage jeweils die Argumentprüfung.
 - Das Live-Ranking zu Gemeindegrenzen lieferte in diesem Lauf drei
   Katalogtreffer mit zwei Modellaufrufen. Der zuvor dokumentierte
   Provider-Fehler HTTP 503 trat in diesem Lauf nicht auf.
+
+## Experimentelles Java-25-Backend auf der früheren Chat-Schnittstelle
+
+Basis `8b35a19fd05ca63d4c0d7bc9d7003a27746ed65a` von
+`codex/model-gis-intents`. OpenCode 2.0.28 mit
+`deepseek/deepseek-flash` meldete **PASS** für
+`1ac9feb0197e33a1ae2d6f68e6b11648594dcea5` mit kleineren Befunden.
+`55fb6fdf1f4e390458f648e65e8e438e95b9b7ec` korrigierte den
+`Host`-Abgleich und erhielt **PASS**. Danach wurden System- und Objekt-Prompt,
+Diagnose-Zeitstempel und Tests für veröffentlichte Objektbezeichnungen ergänzt.
+Das abschliessende Review von `670b2a0e743a2b314479f8c947674b5c0916e9fc`
+ergab **PASS** ohne Produktbefunde. Es wiederholte alle 13 Java-Testgruppen
+mit 76 HTTP-Vergleichen.
+Beim ersten Review führte eine Portkollision einmal zu einem unbeabsichtigten
+Modellaufruf über das bestehende FastAPI. Der Reviewer meldete keine Offenlegung
+von Zugangsdaten.
+
+Lokal bestanden 13 Java-Testgruppen mit 76 kontrollierten HTTP-Vergleichen,
+23 Python-Tests und 43 Node-Tests. Eine zusätzliche Warteprobe mit dem
+HTTP-Fixture ergab für beide Backends nach 25 Sekunden
+`504 providerTimeout`. JBang, Fat-JAR, das portable JAR mit aktivem
+Leyden-Cache und das macOS-arm64-Native-Image wurden gestartet.
+Der Test mit den drei Exporten verifizierte Health, fünf Geo-Werkzeuge,
+Intent-Ablehnung, Infomaniak-Tool-Calling und die Chat-Diagnostik.
+
+Im Live-Browser bestätigten LayerTree und QWC-URL den Altlasten-Layer.
+Der Kartenausschnitt umfasste Grundstück 2084 in Solothurn. Bei kontrolliert
+mehrdeutigen Grundstücken blieb der Layer nach der Rückfrage geladen. Nur die
+Objektsuche und der Zoom wurden fortgesetzt. Die Fachabfrage am Klosterplatz 1
+lieferte `Au`. Der negierte Zoom-Befehl erhielt in beiden Backends
+`502 invalidModelResponse` ohne Kartenänderung. Eine hypothetische
+Zoomfrage änderte die Karte ebenfalls nicht.
+
+Live geprüft wurden die genannten Kartenfälle. Lasttests und Native-Builds
+auf anderen Betriebssystemen standen aus. Die dokumentierten Abweichungen
+bei syntaktisch ungültiger Modellantwort und der Java-Grössenbegrenzung
+galten für diesen Stand. [Startbefehle und Messwerte](../assistant-java/README.md)
+
+## Java 25 mit serverseitiger Chat-Orchestrierung
+
+Integrationsbasis `979283ed29f3af19a2c8ead6ddf67314c1444ac3`, FastAPI-Referenz
+`abdfa1fcf6ad16219c2a080fd5aa2e3cab4efc58` auf `main`. Unabhängig geprüft
+`e21f44fabdd7b6b39c2c9b686d7a5aa6d016d4cb` mit OpenCode 2.0.28 und
+`deepseek/deepseek-flash`. Ergebnis **PASS** mit 16 Java-Testgruppen und
+79 kontrollierten HTTP-Vergleichen. Die Anmerkungen zu zusätzlichen
+Request-Feldern und Logging wurden am Python-Code abgeglichen.
+FastAPI verbietet Zusatzfelder ebenfalls und protokolliert die beiden
+POST-Routen.
+
+Lokal bestanden dieselben Java-Paritätstests sowie 31 Python- und
+34 Node-Tests. Der Produktionsbuild von QWC2 meldete die bekannten
+Grössenwarnungen. QWC2 über den vorhandenen Proxy und Java erreichte
+die Langendorfstrasse 19b in 8,2 Sekunden mit einem Browser-POST und
+einem Modellaufruf. Der kombinierte Altlasten- und Grundstücksauftrag
+brauchte 7,4 Sekunden mit einem Browser-POST, einem Modellaufruf und
+drei Geo-Werkzeugen. **Details** für das Altlasten-Kataster lieferten
+die Katalog-ID über einen direkten Geo-Aufruf.
+
+JBang, Fat-JAR, Leyden mit aktivem AOT-Cache und macOS-arm64-Native-Image
+lieferten Health, alle fünf Geo-Antworten und einen echten Adresszoom
+mit Diagnosezählern. Die Messung umfasst fünf Starts je Artefaktvariante.
+Java begrenzt die Providerantwort zusätzlich auf 4 MiB. Lasttests und
+Native-Builds auf anderen Plattformen stehen aus.
+[Startbefehle und Messwerte](../assistant-java/README.md#messung)

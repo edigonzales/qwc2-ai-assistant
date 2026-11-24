@@ -6,6 +6,9 @@ Suchdienste von geo.so.ch. QWC2 stammt aus dem
 und verwendet dessen unveränderte Version `qwc2-lts@2026.0.30`. Die BSD-Lizenz
 steht in [frontend/LICENSE](frontend/LICENSE).
 
+Ein experimentelles Java-25-Backend steht parallel zu FastAPI zur Verfügung.
+[Java-Start und Prüfungen](assistant-java/README.md)
+
 ## Architektur
 
 Der QWC2-Webserver leitet `POST /assistant-api/v1/chat` an
