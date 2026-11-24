@@ -364,3 +364,13 @@ mit Diagnosezählern. Die Messung umfasst fünf Starts je Artefaktvariante.
 Java begrenzt die Providerantwort zusätzlich auf 4 MiB. Lasttests und
 Native-Builds auf anderen Plattformen stehen aus.
 [Startbefehle und Messwerte](../assistant-java/README.md#messung)
+
+## Architektur-Dokumentation für FastAPI und Java
+
+Basis `33538d975ba13d3f8cebfddd5c1194965a5c02f9`, geprüft
+`d17f30f86743e0e90045c58b6313b3b0caa5be76`. **PASS** mit
+OpenCode 2.0.28 und `deepseek/deepseek-flash`. Proxy-Routen,
+Java-Port, Tool-Schemas, Ressourceneinbindung und historische Zuordnung
+der Mermaid-Diagramme wurden mit dem Code und der Git-Historie
+abgeglichen. Lokal bestanden `git diff --check` und die Prüfung von
+20 lokalen Links und Markdown-Ankern. Der Diff betrifft die Dokumentation.
