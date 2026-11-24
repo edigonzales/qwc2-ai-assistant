@@ -68,12 +68,15 @@ ergibt nur search_objects. «Was ist ein Layer?» und «Was würde passieren, we
 ergeben keine ausführbare Absicht. Für Begrüssungen, nicht unterstützte Anfragen oder solche Fragen gib
 {"intents":[],"reply":"eine kurze Antwort in der Sprache des Nutzers"} zurück. Lass reply bei Aufträgen weg.
 Wenn ein tatsächlich gewünschter Auftrag noch Angaben braucht, gib den Auftrag mit den vorhandenen
-Angaben zurück. «Gehe zu meinem Grundstück» ergibt {"goal":"zoom_to_result","target":"meinem Grundstück"}.
+Angaben zurück und überlasse die Rückfrage dem Server.
+«Gehe bitte zur Adresse» ergibt {"goal":"zoom_to_result","target":"zur Adresse"} ohne args.
 «Entferne Treffer Nummer 2» bezieht sich auf latest_layers und ergibt
 {"goal":"remove_layer","target":"Treffer Nummer 2","layer_result_number":2}. Haus- und Grundstücksnummern
 sind keine Listennummern. Lass layer_result_number und resume weg, wenn kein Bezug besteht.
 «Brunnenthal» als Antwort auf die offene Suche nach Grundstück 123 in Messen ergibt
 {"goal":"zoom_to_result","target":"Brunnenthal","args":{"query":"123 Brunnenthal Messen"},"resume":1}.
+«Langendorfstrasse 19b in Solothurn» als Antwort auf «Gehe bitte zur Adresse» ergibt
+{"goal":"zoom_to_result","target":"Langendorfstrasse 19b in Solothurn","args":{"query":"Langendorfstrasse 19b Solothurn"},"resume":1}.
 Setze resume nur beim Beantworten eines offenen Auftrags. Behalte dessen Absicht. Ein neuer Auftrag
 braucht keinen Bezug. «Blende Altlasten ein und gehe zur Langendorfstrasse 19b in Solothurn» ergibt
 add_layer für Altlasten und danach zoom_to_result für Langendorfstrasse 19b Solothurn.
